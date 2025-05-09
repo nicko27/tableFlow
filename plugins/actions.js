@@ -1,7 +1,7 @@
 export default class ActionsPlugin {
     constructor(config = {}) {
         this.name = 'actions';
-        this.version = '1.2.0'; // Version mise à jour
+        this.version = '1.3.0'; // Version mise à jour pour le support des valeurs multiples
         this.type = 'action';
         this.table = null;
         this.dependencies = [];
@@ -14,6 +14,7 @@ export default class ActionsPlugin {
         this.handleCellChange = this.handleCellChange.bind(this);
         this.handleRowSaved = this.handleRowSaved.bind(this);
         this.handleRowAdded = this.handleRowAdded.bind(this);
+        this._tagRemovedListener = null; // Stockage pour l'écouteur d'événement tag:removed
     }
 
     getDefaultConfig() {
@@ -75,6 +76,9 @@ export default class ActionsPlugin {
         this.table.table.addEventListener('cell:change', this.handleCellChange);
         this.table.table.addEventListener('row:saved', this.handleRowSaved);
         this.table.table.addEventListener('row:added', this.handleRowAdded);
+
+        // Configurer l'écouteur pour les événements tag:removed
+        this.setupTagRemovedListener();
     }
 
     handleRowSaved(event) {
@@ -172,6 +176,19 @@ export default class ActionsPlugin {
             return;
         }
 
+        // Si actions n'est pas fourni, essayer de le récupérer à partir de l'en-tête
+        if (!actions) {
+            const columnId = cell.id.split('_')[0];
+            const headerCell = this.table.table.querySelector(`thead th#${columnId}`);
+            if (headerCell && headerCell.hasAttribute(this.config.actionAttribute)) {
+                const actionsStr = headerCell.getAttribute(this.config.actionAttribute);
+                actions = actionsStr.split(',').map(a => a.trim()).filter(Boolean);
+            } else {
+                this.debug(`ERREUR: Impossible de déterminer les actions pour la cellule ${cell.id}`);
+                return;
+            }
+        }
+
         cell.classList.add(this.config.cellClass);
         const wrapper = cell.querySelector('.cell-wrapper') || cell;
         wrapper.innerHTML = '';
@@ -204,16 +221,16 @@ export default class ActionsPlugin {
 
             // Ajouter la classe de bouton d'action
             actionElement.classList.add(this.config.actionButtonClass);
-            
+
             // Configurer l'action
             actionElement.setAttribute('data-action', actionName);
-            
+
             // Ajouter un tooltip si défini
             if (actionConfig.tooltip) {
                 actionElement.setAttribute(this.config.tooltipAttribute, actionConfig.tooltip);
                 actionElement.setAttribute('data-tooltip-position', actionConfig.tooltipPosition || this.config.tooltipPosition);
             }
-            
+
             const computedStyle = window.getComputedStyle(actionElement);
             const originalDisplay = computedStyle.display || 'inline-block';
             actionElement.setAttribute('data-original-display', originalDisplay);
@@ -241,13 +258,13 @@ export default class ActionsPlugin {
             actionElement.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 // Ne pas exécuter si le bouton est désactivé
-                if (actionElement.classList.contains(this.config.actionButtonDisabledClass) || 
+                if (actionElement.classList.contains(this.config.actionButtonDisabledClass) ||
                     actionElement.hasAttribute('disabled')) {
                     return;
                 }
-                
+
                 this.executeAction(actionName, e.target.closest('td'));
             });
         });
@@ -348,10 +365,10 @@ export default class ActionsPlugin {
             // Exécuter l'action
             if (typeof actionConfig.handler === 'function') {
                 this.debug(`Appel du handler pour "${actionName}" (source: ${context.source})`);
-                
+
                 // Supporter les handlers asynchrones
                 const result = actionConfig.handler(context);
-                
+
                 if (result instanceof Promise) {
                     result
                         .then(() => {
@@ -380,7 +397,7 @@ export default class ActionsPlugin {
         } catch (error) {
             this.debug(`ERREUR lors de l'exécution de l'action "${actionName}":`, error);
             console.error(`Erreur lors de l'exécution de l'action "${actionName}":`, error);
-            
+
             // S'assurer de retirer la classe active en cas d'erreur
             const actionButton = cell.querySelector(`[data-action="${actionName}"]`);
             if (actionButton) {
@@ -429,26 +446,61 @@ export default class ActionsPlugin {
             }
 
             let value = cell.getAttribute('data-value');
-            if (value === null) {
+            if (value === null || value === undefined) {
                 const wrapper = cell.querySelector('.cell-wrapper');
                 value = wrapper ? wrapper.textContent.trim() : cell.textContent.trim();
+                // Mettre à jour l'attribut data-value si nécessaire
+                if (value !== null && value !== undefined) {
+                    cell.setAttribute('data-value', value);
+                }
             }
 
-            // Conversion des types
-            let convertedValue = value;
-            if (!isNaN(value) && value !== '') {
-                convertedValue = Number(value);
-            } else if (value === 'true' || value === 'false') {
-                convertedValue = value === 'true';
+            // Vérifier si c'est une cellule multiple
+            const isMultiple = cell.getAttribute('data-choice-type') === 'multiple';
+
+            if (isMultiple) {
+                // Récupérer la configuration de la colonne pour obtenir le séparateur
+                let separator = ','; // Séparateur par défaut
+
+                // Essayer de récupérer le plugin Choice et sa configuration
+                const choicePlugin = this.table.getPlugin('choice');
+                if (choicePlugin) {
+                    const columnConfig = choicePlugin.getColumnConfig(header.id);
+                    if (columnConfig && columnConfig.multiple && columnConfig.multiple.separator) {
+                        separator = columnConfig.multiple.separator;
+                    }
+                }
+
+                // Convertir la chaîne en tableau
+                const valueArray = value ? value.split(separator).map(v => v.trim()).filter(Boolean) : [];
+
+                // Stocker le tableau de valeurs
+                data[header.id] = valueArray;
+
+                this.debug(`Valeur multiple collectée pour ${header.id}:`, {
+                    raw: value,
+                    converted: valueArray,
+                    type: 'array'
+                });
+            } else {
+                // Conversion des types pour les valeurs simples
+                let convertedValue = value;
+                if (value !== null && value !== undefined) {
+                    if (!isNaN(value) && value !== '') {
+                        convertedValue = Number(value);
+                    } else if (value === 'true' || value === 'false') {
+                        convertedValue = value === 'true';
+                    }
+                }
+
+                data[header.id] = convertedValue;
+
+                this.debug(`Valeur collectée pour ${header.id}:`, {
+                    raw: value,
+                    converted: convertedValue,
+                    type: typeof convertedValue
+                });
             }
-
-            data[header.id] = convertedValue;
-
-            this.debug(`Valeur collectée pour ${header.id}:`, {
-                raw: value,
-                converted: convertedValue,
-                type: typeof convertedValue
-            });
         });
 
         return data;
@@ -616,7 +668,7 @@ export default class ActionsPlugin {
                 // Mettre à jour l'état désactivé si nécessaire
                 if (actionConfig.isDisabled && typeof actionConfig.isDisabled === 'function') {
                     const isDisabled = actionConfig.isDisabled(rowData, row);
-                    
+
                     if (isDisabled) {
                         button.classList.add(this.config.actionButtonDisabledClass);
                         button.setAttribute('disabled', 'disabled');
@@ -721,14 +773,14 @@ export default class ActionsPlugin {
         }
 
         this.debug('Rafraîchissement de la ligne:', row.id);
-        
+
         // Mettre à jour les boutons d'action
         if (this.hasActionColumns()) {
             // Vérifier si la ligne est modifiée
             const isModified = row.classList.contains(this.config.modifiedClass);
             this.updateActionButtons(row, { showOnModified: isModified });
         }
-        
+
         // Déclencher un événement de rafraîchissement
         const refreshEvent = new CustomEvent('row:refresh', {
             detail: {
@@ -738,7 +790,7 @@ export default class ActionsPlugin {
             },
             bubbles: true
         });
-        
+
         this.table.table.dispatchEvent(refreshEvent);
     }
 
@@ -747,6 +799,9 @@ export default class ActionsPlugin {
         if (this.hasActionColumns()) {
             this.setupActionColumns();
         }
+
+        // Reconfigurer l'écouteur tag:removed
+        this.setupTagRemovedListener();
     }
 
     destroy() {
@@ -755,6 +810,156 @@ export default class ActionsPlugin {
             this.table.table.removeEventListener('cell:change', this.handleCellChange);
             this.table.table.removeEventListener('row:saved', this.handleRowSaved);
             this.table.table.removeEventListener('row:added', this.handleRowAdded);
+
+            // Supprimer l'écouteur tag:removed
+            if (this._tagRemovedListener) {
+                this.table.table.removeEventListener('tag:removed', this._tagRemovedListener);
+                this._tagRemovedListener = null;
+            }
         }
+    }
+
+    // Méthode pour écouter les événements de suppression de tag
+    setupTagRemovedListener() {
+        if (!this.table?.table) return;
+
+        // Supprimer l'écouteur existant s'il y en a un
+        if (this._tagRemovedListener) {
+            this.table.table.removeEventListener('tag:removed', this._tagRemovedListener);
+        }
+
+        // Créer un nouvel écouteur
+        this._tagRemovedListener = (event) => {
+            if (!event.detail) return;
+
+            const { rowId, columnId, value } = event.detail;
+            const row = this.table.table.querySelector(`tr[id="${rowId}"]`);
+
+            if (row) {
+                this.debug(`Tag supprimé dans la ligne ${rowId}, colonne ${columnId}: ${value}`);
+
+                // Marquer la ligne comme modifiée
+                row.classList.add(this.config.modifiedClass);
+
+                // Mettre à jour les boutons d'action
+                this.updateActionButtons(row, { showOnModified: true });
+
+                // Déclencher un événement cell:change pour que d'autres plugins puissent réagir
+                const cell = event.detail.cell;
+                if (cell) {
+                    const cellChangeEvent = new CustomEvent('cell:change', {
+                        detail: {
+                            cell,
+                            value: cell.getAttribute('data-value'),
+                            columnId,
+                            rowId,
+                            source: 'tag-removed',
+                            tableId: this.table.table.id,
+                            isModified: true,
+                            eventId: `tag-removed-${rowId}-${columnId}-${Date.now()}`
+                        },
+                        bubbles: true
+                    });
+                    this.table.table.dispatchEvent(cellChangeEvent);
+                }
+            }
+        };
+
+        // Ajouter l'écouteur
+        this.table.table.addEventListener('tag:removed', this._tagRemovedListener);
+        this.debug('Écouteur d\'événement tag:removed configuré');
+    }
+    
+    /**
+     * Met à jour une cellule avec des valeurs multiples
+     * @param {HTMLTableCellElement} cell - La cellule à mettre à jour
+     * @param {Array} values - Tableau des valeurs à définir
+     * @param {string} columnId - ID de la colonne
+     */
+    updateMultipleCell(cell, values, columnId) {
+        if (!cell || !Array.isArray(values)) {
+            this.debug('ERREUR: Paramètres invalides pour updateMultipleCell');
+            return;
+        }
+        
+        // Récupérer la configuration du plugin Choice si disponible
+        const choicePlugin = this.table.getPlugin('choice');
+        let separator = ','; // Séparateur par défaut
+        
+        if (choicePlugin) {
+            const columnConfig = choicePlugin.getColumnConfig(columnId);
+            if (columnConfig && columnConfig.multiple && columnConfig.multiple.separator) {
+                separator = columnConfig.multiple.separator;
+            }
+        }
+        
+        // Joindre les valeurs en une chaîne
+        const newValue = values.join(separator);
+        
+        // Mettre à jour l'attribut data-value
+        cell.setAttribute('data-value', newValue);
+        
+        // Mettre à jour l'affichage si le plugin Choice n'est pas disponible
+        if (!choicePlugin) {
+            const wrapper = cell.querySelector('.cell-wrapper');
+            if (wrapper) {
+                wrapper.textContent = newValue;
+            }
+        }
+        
+        // Marquer la ligne comme modifiée
+        const row = cell.closest('tr');
+        if (row) {
+            row.classList.add(this.config.modifiedClass);
+            
+            // Mettre à jour les boutons d'action
+            this.updateActionButtons(row, { showOnModified: true });
+        }
+        
+        // Déclencher l'événement de changement
+        const changeEvent = new CustomEvent('cell:change', {
+            detail: {
+                cell,
+                value: newValue,
+                columnId,
+                rowId: row ? row.id : null,
+                source: 'actions',
+                tableId: this.table?.table?.id,
+                isModified: true,
+                eventId: `multiple-update-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+            },
+            bubbles: true
+        });
+        
+        if (this.table?.table) {
+            this.table.table.dispatchEvent(changeEvent);
+        }
+        
+        this.debug(`Cellule multiple mise à jour: ${columnId}, valeurs:`, values);
+    }
+    
+    /**
+     * Récupère les valeurs multiples d'une cellule
+     * @param {HTMLTableCellElement} cell - La cellule à analyser
+     * @returns {Array} - Tableau des valeurs
+     */
+    getMultipleValues(cell) {
+        if (!cell) return [];
+        
+        const columnId = cell.getAttribute('data-choice-column') || cell.id.split('_')[0];
+        
+        // Récupérer la configuration du plugin Choice si disponible
+        const choicePlugin = this.table.getPlugin('choice');
+        let separator = ','; // Séparateur par défaut
+        
+        if (choicePlugin) {
+            const columnConfig = choicePlugin.getColumnConfig(columnId);
+            if (columnConfig && columnConfig.multiple && columnConfig.multiple.separator) {
+                separator = columnConfig.multiple.separator;
+            }
+        }
+        
+        const currentValue = cell.getAttribute('data-value') || '';
+        return currentValue.split(separator).map(v => v.trim()).filter(Boolean);
     }
 }

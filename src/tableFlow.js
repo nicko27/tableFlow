@@ -97,7 +97,7 @@ export default class TableFlow {
                     const columnId = this.table.querySelector(`thead th:nth-child(${cell.cellIndex + 1})`).id;
                     const value = cell.textContent.trim();
                     rowValues.set(columnId, value);
-                    
+
                     // Ajouter les attributs data-initial-value et data-value
                     cell.setAttribute('data-initial-value', value);
                     cell.setAttribute('data-value', value);
@@ -131,7 +131,7 @@ export default class TableFlow {
 
         // Normaliser la configuration des plugins
         let pluginsToLoad = [];
-        
+
         if (this.options.plugins.names && Array.isArray(this.options.plugins.names)) {
             // Nouvelle approche avec tableau de noms
             pluginsToLoad = this.options.plugins.names.map(name => {
@@ -172,13 +172,13 @@ export default class TableFlow {
         for (const plugin of pluginsToLoad) {
             try {
                 const pluginPath = `${this.options.pluginsPath}/${plugin.name.toLowerCase()}.js`;
-                
+
                 this.logger.debug(`Chargement du plugin: ${plugin.name} depuis ${pluginPath}`);
 
                 // Charger le plugin
                 try {
                     const pluginModule = await import(pluginPath);
-                    
+
                     if (!pluginModule.default) {
                         throw new Error(`Le plugin ${plugin.name} n'exporte pas de classe par défaut`);
                     }
@@ -209,7 +209,7 @@ export default class TableFlow {
 
                 } catch (importError) {
                     // Capture les erreurs spécifiques d'importation de module
-                    if (importError.message.includes("Failed to fetch") || 
+                    if (importError.message.includes("Failed to fetch") ||
                         importError.message.includes("Cannot find module") ||
                         importError.message.includes("Unexpected token")) {
                         throw new Error(`Impossible de charger le plugin ${plugin.name} depuis ${pluginPath}. Vérifiez que le fichier existe et est accessible. Erreur: ${importError.message}`);
@@ -223,7 +223,7 @@ export default class TableFlow {
                 const errorMessage = `Échec du chargement du plugin ${plugin.name}: ${error.message}`;
                 this.logger.error(errorMessage, error);
                 pluginErrors.push({ plugin: plugin.name, error: errorMessage });
-                
+
                 // Stocker l'erreur pour référence
                 this.plugins.set(plugin.name.toLowerCase(), { error });
             }
@@ -294,7 +294,7 @@ export default class TableFlow {
                     cell.appendChild(wrapper);
                 }
             });
-            
+
             this.logger.debug('Wrappers initialisés pour les cellules de la table');
         } catch (error) {
             this.logger.error(`Échec de l'initialisation des wrappers: ${error.message}`, error);
@@ -317,18 +317,18 @@ export default class TableFlow {
             this.logger.warn('getPlugin appelé sans nom de plugin');
             return null;
         }
-        
+
         const plugin = this.plugins.get(name.toLowerCase());
         if (!plugin) {
             this.logger.warn(`Plugin ${name} non trouvé`);
             return null;
         }
-        
+
         if (plugin.error) {
             this.logger.warn(`Le plugin ${name} a échoué lors de son chargement: ${plugin.error.message}`);
             return null;
         }
-        
+
         return plugin.instance;
     }
 
@@ -337,10 +337,10 @@ export default class TableFlow {
             // Rafraîchit les plugins dans l'ordre de leurs dépendances
             const refreshed = new Set();
             const failedPlugins = [];
-            
+
             const refreshPlugin = (pluginName) => {
                 if (refreshed.has(pluginName)) return true;
-                
+
                 const pluginInfo = this.plugins.get(pluginName.toLowerCase());
                 if (!pluginInfo?.instance) {
                     this.logger.debug(`Skip refresh for non-existent plugin: ${pluginName}`);
@@ -358,7 +358,7 @@ export default class TableFlow {
                         }
                     }
                 }
-                
+
                 if (!allDependenciesOk) {
                     failedPlugins.push(pluginName);
                     return false;
@@ -454,7 +454,7 @@ export default class TableFlow {
 
     markRowAsModified(row) {
         if (!row) return;
-        
+
         if (this.isRowModified(row)) {
             row.classList.add('modified');
         } else {
@@ -488,7 +488,7 @@ export default class TableFlow {
             this.logger.warn('markRowAsSaved appelé sans ligne');
             return;
         }
-        
+
         try {
             // Mettre à jour la carte des valeurs initiales
             const rowValues = new Map();
@@ -509,14 +509,14 @@ export default class TableFlow {
                     }
                 }
             });
-            
+
             // Nettoyer la ligne
             row.removeAttribute('data-modified');
             row.classList.remove('modified');
-            
+
             // Émettre l'événement row:saved avec toutes les options
             this.table.dispatchEvent(new CustomEvent('row:saved', {
-                detail: { 
+                detail: {
                     row,
                     options,
                     rowId: row.id,
@@ -529,7 +529,7 @@ export default class TableFlow {
                 },
                 bubbles: true
             }));
-            
+
             this.logger.debug(`Ligne ${row.id} marquée comme sauvegardée`);
         } catch (error) {
             this.logger.error(`Erreur lors du marquage de la ligne comme sauvegardée: ${error.message}`, error);
@@ -553,17 +553,17 @@ export default class TableFlow {
             headers.forEach((header, index) => {
                 const cell = document.createElement('td');
                 const columnId = header.id;
-                
+
                 // Configuration de l'ID de la cellule basé sur columnId et rowId
                 cell.id = `${columnId}_${newId}`;
-                
+
                 // Créer le wrapper pour le contenu
                 const wrapper = document.createElement('div');
                 wrapper.className = this.options.cellWrapperClass;
 
                 // Déterminer la valeur à afficher
                 let displayValue = '';
-                
+
                 // Cas 1: La donnée est un tableau indexé par position
                 if (Array.isArray(data) && data[index] !== undefined) {
                     displayValue = data[index];
@@ -579,11 +579,11 @@ export default class TableFlow {
 
                 wrapper.textContent = displayValue;
                 cell.appendChild(wrapper);
-                
+
                 // Définir les attributs data-value et data-initial-value
                 cell.setAttribute('data-value', displayValue);
                 cell.setAttribute('data-initial-value', displayValue);
-                
+
                 row.appendChild(cell);
             });
 
@@ -599,7 +599,7 @@ export default class TableFlow {
 
             // Déclencher l'événement pour les plugins
             this.table.dispatchEvent(new CustomEvent('row:added', {
-                detail: { 
+                detail: {
                     row,
                     position,
                     data: this.getRowData(row)
@@ -609,7 +609,7 @@ export default class TableFlow {
 
             // Rafraîchir tous les plugins
             this.refreshPlugins();
-            
+
             this.logger.debug(`Nouvelle ligne ajoutée avec l'ID ${newId} à la position ${position}`);
             return row;
         } catch (error) {
@@ -629,7 +629,7 @@ export default class TableFlow {
 
             // Déclencher l'événement avant la suppression
             this.table.dispatchEvent(new CustomEvent('row:removing', {
-                detail: { 
+                detail: {
                     row,
                     rowId: rowId,
                     data: this.getRowData(row)
@@ -647,7 +647,7 @@ export default class TableFlow {
 
             // Déclencher l'événement après la suppression
             this.table.dispatchEvent(new CustomEvent('row:removed', {
-                detail: { 
+                detail: {
                     rowId: rowId
                 },
                 bubbles: true
@@ -666,23 +666,23 @@ export default class TableFlow {
 
     getRowData(row) {
         if (!row) return {};
-        
+
         try {
             const data = {};
             const headers = Array.from(this.table.querySelectorAll('thead th'));
-            
+
             // Ajouter l'ID de ligne s'il existe
             if (row.id) {
                 data.id = row.id;
             }
-            
+
             // Récupérer les données de chaque cellule
             Array.from(row.cells).forEach((cell, index) => {
                 const header = headers[index];
                 if (!header?.id) return;
-                
+
                 let value;
-                
+
                 // Préférer data-value s'il existe
                 if (cell.hasAttribute('data-value')) {
                     value = cell.getAttribute('data-value');
@@ -691,7 +691,7 @@ export default class TableFlow {
                     const wrapper = cell.querySelector(`.${this.options.cellWrapperClass}`);
                     value = wrapper ? wrapper.textContent.trim() : cell.textContent.trim();
                 }
-                
+
                 // Conversion de type
                 if (!isNaN(value) && value !== '') {
                     data[header.id] = Number(value);
@@ -701,7 +701,7 @@ export default class TableFlow {
                     data[header.id] = value;
                 }
             });
-            
+
             return data;
         } catch (error) {
             this.logger.error(`Erreur lors de la récupération des données de ligne: ${error.message}`, error);
@@ -712,7 +712,7 @@ export default class TableFlow {
     destroy() {
         try {
             this.logger.info('Destruction de l\'instance TableFlow...');
-            
+
             // Détruire tous les plugins
             const pluginNames = Array.from(this.plugins.keys());
             for (const name of pluginNames) {
@@ -730,7 +730,7 @@ export default class TableFlow {
 
             // Supprimer les événements et références
             this.initialValues.clear();
-            
+
             this.logger.success('Instance TableFlow détruite avec succès');
         } catch (error) {
             this.logger.error(`Erreur lors de la destruction de TableFlow: ${error.message}`, error);
@@ -743,7 +743,7 @@ export default class TableFlow {
             if (this._inNotification) {
                 return;
             }
-            
+
             this._inNotification = true;
             if (this.notifications && typeof this.notifications[type] === 'function') {
                 this.notifications[type](message);
@@ -752,6 +752,58 @@ export default class TableFlow {
         } catch (error) {
             this._inNotification = false;
             console.error(`[TableFlow] Erreur lors de la notification (${type}): ${error.message}`);
+        }
+    }
+
+    // Méthode pour réappliquer les plugins à une cellule
+    reapplyPluginsToCell(cell, columnId) {
+        if (!cell || !columnId) {
+            this.logger.warn('reapplyPluginsToCell appelé avec des paramètres invalides');
+            return;
+        }
+
+        try {
+            this.logger.debug(`Réapplication des plugins à la cellule ${cell.id} (colonne ${columnId})`);
+
+            // Appeler la méthode appropriée sur chaque plugin
+            this.plugins.forEach((pluginInfo, pluginName) => {
+                if (pluginInfo.instance) {
+                    // Pour le plugin Choice
+                    if (pluginName === 'choice' && typeof pluginInfo.instance.setupChoiceCell === 'function') {
+                        const headerCell = this.table.querySelector(`thead th#${columnId}`);
+                        if (headerCell && headerCell.hasAttribute(pluginInfo.instance.config.choiceAttribute)) {
+                            const choiceType = headerCell.getAttribute(pluginInfo.instance.config.choiceAttribute) || 'toggle';
+                            pluginInfo.instance.setupChoiceCell(cell, columnId, choiceType);
+                        }
+                    }
+
+                    // Pour le plugin Actions
+                    else if (pluginName === 'actions' && typeof pluginInfo.instance.setupActionCell === 'function') {
+                        // Récupérer les actions à partir de l'en-tête de colonne
+                        const columnHeader = this.table.querySelector(`thead th#${columnId}`);
+                        let actions = null;
+                        if (columnHeader && columnHeader.hasAttribute(pluginInfo.instance.config.actionAttribute)) {
+                            const actionsStr = columnHeader.getAttribute(pluginInfo.instance.config.actionAttribute);
+                            actions = actionsStr.split(',').map(a => a.trim()).filter(Boolean);
+                        }
+                        pluginInfo.instance.setupActionCell(cell, actions);
+                    }
+
+                    // Pour le plugin Edit
+                    else if (pluginName === 'edit' && typeof pluginInfo.instance.setupEditableCell === 'function') {
+                        pluginInfo.instance.setupEditableCell(cell);
+                    }
+
+                    // Pour tout autre plugin avec une méthode setupCell
+                    else if (typeof pluginInfo.instance.setupCell === 'function') {
+                        pluginInfo.instance.setupCell(cell, columnId);
+                    }
+                }
+            });
+
+            this.logger.debug(`Plugins réappliqués avec succès à la cellule ${cell.id}`);
+        } catch (error) {
+            this.logger.error(`Erreur lors de la réapplication des plugins à la cellule: ${error.message}`, error);
         }
     }
 }

@@ -2,19 +2,22 @@
 
 ## Vue d'ensemble
 
-Le plugin Choice permet de transformer des cellules de tableau en éléments de sélection interactifs. Il offre deux modes principaux : le mode "toggle" pour basculer entre des valeurs prédéfinies, et le mode "searchable" pour rechercher et sélectionner des valeurs dans une liste déroulante, avec support pour les requêtes AJAX.
+Le plugin Choice permet de transformer des cellules de tableau en éléments de sélection interactifs. Il offre trois modes principaux : le mode "toggle" pour basculer entre des valeurs prédéfinies, le mode "searchable" pour rechercher et sélectionner des valeurs dans une liste déroulante, et le mode "multiple" pour sélectionner plusieurs valeurs dans une même cellule, tous avec support pour les requêtes AJAX.
 
 ## Version
 
-Version actuelle : 3.0.0
+Version actuelle : 3.2.0
 
 ## Fonctionnalités
 
-- Deux modes de sélection : toggle et searchable
+- Trois modes de sélection : toggle, searchable et multiple
 - Support des requêtes AJAX pour le chargement dynamique des options
 - Autocomplétion avec recherche en temps réel
 - Auto-remplissage d'autres cellules avec des valeurs associées
-- Support pour les valeurs en lecture seule
+- Support pour les valeurs en lecture seule avec fonction de callback dynamique (isReadOnly)
+- Gestion améliorée des URLs relatives et absolues pour les requêtes AJAX
+- Annulation automatique des requêtes AJAX précédentes
+- Sélection multiple avec tags visuels et cases à cocher
 - Personnalisation complète de l'apparence et du comportement
 - Intégration transparente avec les autres plugins TableFlow
 
@@ -22,7 +25,7 @@ Version actuelle : 3.0.0
 
 | Attribut | Applied to | Description |
 |-----------|------------|-------------|
-| `th-choice` | `<th>` | Active le plugin sur une colonne. Peut contenir "toggle" ou "searchable" |
+| `th-choice` | `<th>` | Active le plugin sur une colonne. Peut contenir "toggle", "searchable" ou "multiple" |
 
 ## Options de configuration
 
@@ -46,6 +49,10 @@ Version actuelle : 3.0.0
             readOnlyValues: [         // Valeurs en lecture seule
                 { value: '3', class: 'readonly-locked' }
             ],
+            isReadOnly: (value, rowData) => {
+                // Fonction pour déterminer dynamiquement si une cellule est en lecture seule
+                return rowData.super_admin === 1 || rowData.super_admin === '1';
+            },
             searchable: {             // Options pour le mode searchable
                 minWidth: '200px',
                 dropdownClass: 'choice-dropdown',
@@ -54,6 +61,16 @@ Version actuelle : 3.0.0
                 placeholder: 'Rechercher...',
                 noResultsText: 'Aucun résultat',
                 loadingText: 'Chargement...'
+            },
+            multiple: {               // Options pour le mode multiple
+                separator: ',',       // Séparateur pour les valeurs multiples
+                tagClass: 'choice-tag', // Classe CSS pour les tags
+                tagContainerClass: 'choice-tags', // Classe CSS pour le conteneur de tags
+                removeTagClass: 'choice-tag-remove', // Classe CSS pour le bouton de suppression
+                placeholder: 'Sélectionner des options...', // Texte par défaut
+                maxTags: null,        // Nombre maximum de tags (null = illimité)
+                allowCustomValues: true, // Autoriser l'ajout de valeurs personnalisées
+                customValueClass: 'custom-value' // Classe CSS pour les valeurs personnalisées
             },
             ajax: {                   // Options pour les requêtes AJAX
                 enabled: false,
@@ -65,7 +82,8 @@ Version actuelle : 3.0.0
                 paramName: 'query',   // Nom du paramètre de recherche
                 responseParser: null, // Fonction pour parser la réponse
                 extraParams: {},      // Paramètres supplémentaires
-                loadOnFocus: false    // Charger les options au focus
+                loadOnFocus: false,   // Charger les options au focus
+                abortPrevious: true   // Annuler les requêtes précédentes
             },
             autoFill: {               // Options pour l'auto-remplissage
                 enabled: false,
@@ -122,7 +140,7 @@ Les propriétés supplémentaires (comme `id` et `email` dans l'exemple) peuvent
 
 ## Exemples d'utilisation
 
-### Mode Toggle simple
+### Mode Toggle simple avec isReadOnly
 
 ```javascript
 const table = new TableFlow({
@@ -137,7 +155,12 @@ const table = new TableFlow({
                         { value: 'active', label: '<span class="status-active">Actif</span>' },
                         { value: 'inactive', label: '<span class="status-inactive">Inactif</span>' },
                         { value: 'pending', label: '<span class="status-pending">En attente</span>' }
-                    ]
+                    ],
+                    // Fonction pour déterminer dynamiquement si une cellule est en lecture seule
+                    isReadOnly: (value, rowData) => {
+                        // Exemple: les lignes avec role="admin" ne peuvent pas être modifiées
+                        return rowData.role === 'admin';
+                    }
                 }
             }
         }
@@ -173,6 +196,70 @@ const table = new TableFlow({
 });
 ```
 
+### Mode Multiple avec tags
+
+```javascript
+const table = new TableFlow({
+    tableId: 'monTableau',
+    plugins: {
+        names: ['Choice'],
+        choice: {
+            columns: {
+                'competences': {
+                    type: 'multiple',
+                    values: [
+                        { value: 'js', label: 'JavaScript' },
+                        { value: 'php', label: 'PHP' },
+                        { value: 'python', label: 'Python' },
+                        { value: 'java', label: 'Java' },
+                        { value: 'csharp', label: 'C#' }
+                    ],
+                    multiple: {
+                        separator: ',',
+                        maxTags: 5, // Limiter à 5 compétences maximum
+                        allowCustomValues: true // Permettre d'ajouter des valeurs personnalisées
+                    }
+                }
+            }
+        }
+    }
+});
+```
+
+### Mode Multiple avec recherche AJAX
+
+```javascript
+const table = new TableFlow({
+    tableId: 'monTableau',
+    plugins: {
+        names: ['Choice'],
+        choice: {
+            columns: {
+                'permissions': {
+                    type: 'multiple',
+                    searchable: {
+                        enabled: true,
+                        placeholder: 'Rechercher des permissions...',
+                        minWidth: '300px'
+                    },
+                    ajax: {
+                        enabled: true,
+                        url: '/api/permissions/search',
+                        minChars: 2,
+                        loadOnFocus: true
+                    },
+                    multiple: {
+                        separator: ';',
+                        tagClass: 'permission-tag',
+                        removeTagClass: 'permission-remove'
+                    }
+                }
+            }
+        }
+    }
+});
+```
+
 ### Mode Searchable avec AJAX et auto-remplissage
 
 ```javascript
@@ -189,6 +276,9 @@ const table = new TableFlow({
                         url: '/api/personnes/search',
                         minChars: 3,
                         paramName: 'nom',
+                        debounceTime: 300,
+                        abortPrevious: true, // Annuler les requêtes précédentes
+                        loadOnFocus: true,   // Charger les options au focus
                         responseParser: function(data) {
                             // Transformer la réponse en format attendu
                             return data.map(item => ({
@@ -205,6 +295,11 @@ const table = new TableFlow({
                             'id': 'id_personne',
                             'email': 'email'
                         }
+                    },
+                    // Fonction pour déterminer dynamiquement si une cellule est en lecture seule
+                    isReadOnly: (value, rowData) => {
+                        // Exemple: les utilisateurs avec super_admin=1 ne peuvent pas être modifiés
+                        return rowData.super_admin === 1 || rowData.super_admin === '1';
                     }
                 }
             }
@@ -221,6 +316,7 @@ const table = new TableFlow({
         <tr>
             <th id="status" th-choice="toggle">Statut</th>
             <th id="pays" th-choice="searchable">Pays</th>
+            <th id="competences" th-choice="multiple">Compétences</th>
             <th id="id_personne">ID</th>
             <th id="email">Email</th>
         </tr>
@@ -237,6 +333,9 @@ const table = new TableFlow({
 |--------|-------------|------------|
 | `getColumnConfig(columnId)` | Récupère la configuration d'une colonne | `columnId` - ID de la colonne |
 | `updateCellValue(cell, value, label, columnId, additionalData)` | Met à jour la valeur d'une cellule | `cell` - Cellule à mettre à jour<br>`value` - Nouvelle valeur<br>`label` - Texte à afficher<br>`columnId` - ID de la colonne<br>`additionalData` - Données supplémentaires |
+| `updateMultipleCell(cell, values, columnId)` | Met à jour les valeurs d'une cellule multiple | `cell` - Cellule à mettre à jour<br>`values` - Tableau de valeurs<br>`columnId` - ID de la colonne |
+| `getMultipleValues(cell)` | Récupère les valeurs d'une cellule multiple | `cell` - Cellule à analyser |
+| `renderMultipleTags(container, values, columnId)` | Affiche les tags pour une cellule multiple | `container` - Conteneur pour les tags<br>`values` - Tableau de valeurs<br>`columnId` - ID de la colonne |
 | `fetchOptionsFromAjax(query, columnId)` | Récupère les options via AJAX | `query` - Terme de recherche<br>`columnId` - ID de la colonne |
 | `closeAllDropdowns()` | Ferme tous les menus déroulants | - |
 | `refresh()` | Rafraîchit toutes les cellules | - |
@@ -320,9 +419,47 @@ Le plugin ajoute automatiquement les styles CSS suivants :
 | Les requêtes AJAX échouent | Vérifiez l'URL et les paramètres dans la console du navigateur |
 | L'auto-remplissage ne fonctionne pas | Assurez-vous que les IDs de colonne dans les mappings correspondent aux IDs des colonnes du tableau |
 | Le dropdown ne se ferme pas | Vérifiez qu'il n'y a pas de conflit avec d'autres gestionnaires d'événements |
-| Les valeurs en lecture seule sont modifiables | Vérifiez la configuration `readOnlyValues` ou l'attribut `readOnly` dans les valeurs |
+| Les valeurs en lecture seule sont modifiables | Vérifiez la configuration `readOnlyValues`, l'attribut `readOnly` dans les valeurs ou la fonction `isReadOnly` |
+| Les requêtes AJAX s'accumulent | Activez l'option `abortPrevious: true` pour annuler les requêtes précédentes |
+| Les URLs relatives ne fonctionnent pas | Assurez-vous que les URLs commencent par '/' ou utilisez des URLs absolues |
+| Impossible d'ajouter des valeurs personnalisées | Vérifiez que l'option `allowCustomValues` est définie à `true` dans la configuration `multiple` |
 
 ## Utilisation avancée
+
+### Utilisation de la fonction isReadOnly
+
+```javascript
+// Configuration avec isReadOnly dynamique
+columns: {
+    'status': {
+        type: 'toggle',
+        values: [
+            { value: 'active', label: 'Actif' },
+            { value: 'inactive', label: 'Inactif' }
+        ],
+        isReadOnly: (value, rowData) => {
+            // Exemples de conditions pour rendre une cellule en lecture seule
+            
+            // 1. Basé sur une autre valeur dans la même ligne
+            if (rowData.super_admin === 1 || rowData.super_admin === '1') {
+                return true;
+            }
+            
+            // 2. Basé sur la valeur actuelle de la cellule
+            if (value === 'locked') {
+                return true;
+            }
+            
+            // 3. Combinaison de conditions
+            if (rowData.role === 'guest' && value === 'active') {
+                return true;
+            }
+            
+            return false;
+        }
+    }
+}
+```
 
 ### Personnalisation du parser de réponse AJAX
 
@@ -394,3 +531,77 @@ autoFill: {
     }
 }
 ```
+### Utilisation du mode multiple avec valeurs personnalisées
+
+```javascript
+// Configuration pour permettre aux utilisateurs d'ajouter leurs propres valeurs
+columns: {
+    'tags': {
+        type: 'multiple',
+        values: [
+            { value: 'important', label: 'Important' },
+            { value: 'urgent', label: 'Urgent' },
+            { value: 'bug', label: 'Bug' }
+        ],
+        searchable: {
+            enabled: true,
+            placeholder: 'Rechercher ou ajouter un tag...'
+        },
+        multiple: {
+            allowCustomValues: true,
+            customValueClass: 'custom-tag',
+            separator: ',',
+            maxTags: 10
+        }
+    }
+}
+```
+
+Cette configuration permet aux utilisateurs de :
+1. Sélectionner parmi les valeurs prédéfinies
+2. Rechercher dans les valeurs existantes
+3. Ajouter de nouvelles valeurs qui ne sont pas dans la liste
+4. Les valeurs personnalisées sont affichées avec un style différent (classe `custom-tag`)
+## Valeurs manuelles et fonctions dans autoFill
+
+Le plugin Choice permet désormais de définir des valeurs manuelles ou d'utiliser des fonctions dans les mappings autoFill.
+
+### Valeurs manuelles
+
+```javascript
+autoFill: {
+    enabled: true,
+    mappings: {
+        'id': 'user_id',       // Mapping standard: source -> target
+        'status': '1',         // Valeur manuelle: toujours mettre '1' dans la colonne status
+        'created_at': 'now()', // Valeur manuelle: chaîne de caractères
+        'active': 0            // Valeur manuelle: nombre
+    }
+}
+```
+
+### Fonctions de mapping
+
+```javascript
+autoFill: {
+    enabled: true,
+    mappings: {
+        'id': 'user_id',
+        'role': function(data, row) {
+            // Logique conditionnelle basée sur les données
+            if (data.isAdmin) {
+                return 'admin';
+            } else if (data.permissions && data.permissions.includes('manage')) {
+                return 'manager';
+            } else {
+                return 'user';
+            }
+        },
+        'created_at': (data) => new Date().toISOString().split('T')[0]
+    }
+}
+```
+
+### Réapplication des plugins
+
+Lorsqu'une cellule est mise à jour via autoFill, les plugins sont automatiquement réappliqués à cette cellule pour s'assurer que tous les comportements (toggle, searchable, etc.) fonctionnent correctement après le remplissage.

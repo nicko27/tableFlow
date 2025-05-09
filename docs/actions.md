@@ -2,7 +2,7 @@
 
 Le plugin Actions permet d'ajouter des boutons d'action interactifs dans les cellules d'un tableau TableFlow. Il est idéal pour implémenter des fonctionnalités comme l'édition, la suppression, la sauvegarde ou toute autre action personnalisée sur les lignes du tableau.
 
-**Version actuelle :** 1.2.0  
+**Version actuelle :** 1.3.0  
 **Type :** action  
 **Auteur :** TableFlow Team
 
@@ -16,6 +16,7 @@ Le plugin Actions permet d'ajouter des boutons d'action interactifs dans les cel
 - Support pour les actions asynchrones
 - Désactivation conditionnelle des actions
 - Auto-sauvegarde des modifications
+- Support des valeurs multiples (mode multiple du plugin Choice)
 
 ## Installation
 
@@ -144,7 +145,7 @@ Lorsqu'une action est exécutée, un objet contexte est passé au handler avec l
     row,            // Élément DOM de la ligne
     cell,           // Élément DOM de la cellule d'action
     tableHandler,   // Instance de TableFlow
-    data,           // Données de la ligne sous forme d'objet
+    data,           // Données de la ligne sous forme d'objet (avec tableaux pour les valeurs multiples)
     source,         // Source de l'action ('manual', 'autoSave', etc.)
     utils: {        // Méthodes utilitaires (v1.2.0+)
         markRowAsSaved: (options) => {},  // Marque la ligne comme sauvegardée
@@ -211,6 +212,7 @@ Le plugin écoute et émet plusieurs événements :
 - `cell:change` : Déclenché lorsqu'une cellule est modifiée
 - `row:saved` : Déclenché lorsqu'une ligne est sauvegardée
 - `row:added` : Déclenché lorsqu'une nouvelle ligne est ajoutée
+- `tag:removed` : Déclenché lorsqu'un tag est supprimé dans une cellule multiple
 
 ### Événements émis
 
@@ -219,6 +221,39 @@ Le plugin écoute et émet plusieurs événements :
 - `row:refresh` : Émis lorsqu'une ligne est rafraîchie (v1.2.0+)
 
 ## Exemples d'utilisation
+
+### Utilisation avec des valeurs multiples
+
+```javascript
+const actionsPlugin = new ActionsPlugin({
+    actions: {
+        save: {
+            icon: '<i class="fas fa-save"></i>',
+            handler: async (context) => {
+                const { data } = context;
+                
+                // Les permissions sont disponibles sous forme de tableau
+                console.log('Permissions:', data.permissions); // ['read', 'write', 'admin']
+                
+                // Vérifier si l'utilisateur a une permission spécifique
+                if (data.permissions.includes('admin')) {
+                    // Exécuter une logique spécifique pour les administrateurs
+                }
+                
+                // Filtrer les permissions pour l'API
+                const adminPermissions = data.permissions.filter(p => 
+                    ['admin', 'super_admin'].includes(p)
+                );
+                
+                // Convertir en chaîne pour l'envoi à l'API
+                const permissionsString = data.permissions.join(',');
+                
+                // Reste du code de sauvegarde...
+            }
+        }
+    }
+});
+```
 
 ### Configuration de base
 
@@ -437,6 +472,12 @@ tr.modified {
 
 ## Changelog
 
+### Version 1.3.0
+- Support des valeurs multiples (mode multiple du plugin Choice)
+- Conversion automatique des valeurs séparées en tableaux JavaScript
+- Écoute de l'événement `tag:removed` pour détecter les suppressions de tags
+- Amélioration de la méthode `getRowData()` pour détecter les cellules multiples
+
 ### Version 1.2.0
 - Ajout de classes pour les boutons d'action
 - Support pour les tooltips
@@ -452,3 +493,55 @@ tr.modified {
 
 ### Version 1.0.0
 - Version initiale
+## Support des valeurs multiples
+
+Le plugin Actions prend désormais en charge les cellules configurées avec le mode "multiple" du plugin Choice. Lorsqu'une cellule est en mode multiple, les valeurs séparées par un délimiteur sont automatiquement converties en tableau dans l'objet de données.
+
+### Exemple
+
+```javascript
+// Configuration d'une colonne en mode multiple
+choice: {
+    columns: {
+        'permissions': {
+            type: 'multiple',
+            values: [
+                { value: 'read', label: 'Lecture' },
+                { value: 'write', label: 'Écriture' },
+                { value: 'admin', label: 'Administration' }
+            ],
+            multiple: {
+                separator: ','
+            }
+        }
+    }
+}
+
+// Dans le handler d'une action, les permissions seront disponibles sous forme de tableau
+actions: {
+    save: {
+        handler: function(context) {
+            // context.data.permissions sera un tableau, par exemple: ['read', 'write']
+            console.log(context.data.permissions);
+            
+            // Vous pouvez facilement vérifier si une permission existe
+            if (context.data.permissions.includes('admin')) {
+                // L'utilisateur a des droits d'administration
+            }
+            
+            // Pour envoyer au serveur, vous pouvez reconvertir en chaîne si nécessaire
+            const permissionsString = context.data.permissions.join(',');
+        }
+    }
+}
+```
+
+### Détection automatique
+
+Le plugin détecte automatiquement les cellules en mode multiple en vérifiant l'attribut `data-choice-type="multiple"`. Il récupère également le séparateur configuré dans le plugin Choice pour s'assurer que les valeurs sont correctement divisées.
+
+### Avantages
+
+- Manipulation plus facile des valeurs multiples avec les méthodes de tableau JavaScript (map, filter, includes, etc.)
+- Meilleure intégration avec les API qui attendent des tableaux
+- Conversion automatique sans code supplémentaire
