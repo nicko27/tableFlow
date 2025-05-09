@@ -1,7 +1,7 @@
 export default class FilterAndPaginatePlugin {
     constructor(config = {}) {
         this.name = 'filterandpaginate';
-        this.version = '1.1.0';
+        this.version = '1.2.0';
         this.type = 'filter';
         this.table = null;
         this.config = {...this.getDefaultConfig(), ...config};
@@ -11,6 +11,8 @@ export default class FilterAndPaginatePlugin {
         this.container = null;
         this.filterValue = '';
         this.filterTimeout = null;
+        this.columnFilters = new Map(); // Pour stocker les filtres par colonne
+        this.lastState = null; // Pour stocker l'état précédent
 
         this.debug('Plugin créé avec la config:', this.config);
     }
@@ -26,6 +28,10 @@ export default class FilterAndPaginatePlugin {
             paginationClass: 'pagination',
             activeClass: 'active',
             disabledClass: 'disabled',
+            rememberState: false, // Nouvelle option pour se souvenir de l'état
+            enableColumnFilters: false, // Nouvelle option pour activer les filtres par colonne
+            filterColumnAttribute: 'th-filter', // Attribut pour identifier les colonnes qui peuvent être filtrées
+            filterExcludeAttribute: 'th-filter-exclude', // Attribut pour exclure des colonnes du filtrage
             selectClass: 'form-select',
             btnClass: 'btn btn-glass btn-glass-blue',
             showPageSizes: true,
@@ -36,13 +42,15 @@ export default class FilterAndPaginatePlugin {
                 next: '›',
                 last: '»',
                 info: 'Affichage de {start} à {end} sur {total} entrées',
-                pageSize: 'Entrées par page:'
+                pageSize: 'Entrées par page:',
+                columnFilter: 'Filtrer:' // Nouveau label pour les filtres de colonne
             },
             icons: {
                 first: '<i class="fas fa-angle-double-left"></i>',
                 prev: '<i class="fas fa-chevron-left"></i>',
                 next: '<i class="fas fa-chevron-right"></i>',
-                last: '<i class="fas fa-angle-double-right"></i>'
+                last: '<i class="fas fa-angle-double-right"></i>',
+                filter: '<i class="fas fa-filter"></i>' // Nouvelle icône pour les filtres
             },
             backwardIcon: '<i class="fas fa-chevron-left"></i>',
             forwardIcon: '<i class="fas fa-chevron-right"></i>',
@@ -60,16 +68,41 @@ export default class FilterAndPaginatePlugin {
             this.setupFilter();
         }
 
+        // Setup des filtres par colonne si activés
+        if (this.config.enableColumnFilters) {
+            this.setupColumnFilters();
+        }
+
         // Création et insertion du conteneur
         this.createContainer();
 
-        // Écoute de l'événement de tri
-        this.table.table.addEventListener('sortAppened', () => {
-            this.refresh();
+        // Écoute de l'événement de tri (correction de la typo)
+        this.table.table.addEventListener('sortAppended', () => {
+            // Sauvegarder l'état avant le rafraîchissement
+            this.saveState();
+            this.refresh(true); // Conserver la page actuelle
         });
 
-        // Rafraîchissement initial
-        this.refresh();
+        // Écouter les événements de modification du tableau
+        this.table.table.addEventListener('row:added', () => {
+            this.saveState();
+            this.refresh(true);
+        });
+
+        this.table.table.addEventListener('row:removed', () => {
+            this.saveState();
+            this.refresh(true);
+        });
+
+        this.table.table.addEventListener('cell:change', () => {
+            this.saveState();
+            this.refresh(true);
+        });
+
+        // Restaurer l'état précédent ou faire un rafraîchissement initial
+        if (!this.restoreState()) {
+            this.refresh();
+        }
     }
 
     setupFilter() {
@@ -104,6 +137,93 @@ export default class FilterAndPaginatePlugin {
                     this.table.options.onFilter(this.filterValue);
                 }
             }, this.config.debounceTime);
+        });
+    }
+
+    // Méthode pour ajouter des filtres par colonne
+    setupColumnFilters() {
+        if (!this.config.enableColumnFilters) return;
+        
+        const headerCells = this.table.table.querySelectorAll('thead th');
+        
+        // Exclure les colonnes qui ne doivent pas avoir de filtre
+        const excludeColumns = Array.from(this.table.table.querySelectorAll(`th[${this.config.filterExcludeAttribute}], th[th-sql-exclude], th[th-hide]`))
+            .map(th => Array.from(headerCells).indexOf(th));
+        
+        // Identifier les colonnes qui doivent avoir un filtre
+        const filterColumns = Array.from(headerCells)
+            .map((th, index) => ({ th, index }))
+            .filter(({ th, index }) => {
+                // Si l'attribut filterColumnAttribute est défini, n'ajouter des filtres qu'aux colonnes avec cet attribut
+                if (this.config.filterColumnAttribute) {
+                    return th.hasAttribute(this.config.filterColumnAttribute) && !excludeColumns.includes(index);
+                }
+                // Sinon, ajouter des filtres à toutes les colonnes non exclues
+                return !excludeColumns.includes(index);
+            });
+        
+        this.debug(`${filterColumns.length} colonnes configurées pour le filtrage par colonne`);
+        
+        filterColumns.forEach(({ th: header, index }) => {
+            // Créer le conteneur de filtre
+            const filterContainer = document.createElement('div');
+            filterContainer.className = 'column-filter';
+            
+            // Créer l'icône de filtre
+            const filterIcon = document.createElement('span');
+            filterIcon.className = 'filter-icon';
+            filterIcon.innerHTML = this.config.icons.filter;
+            filterContainer.appendChild(filterIcon);
+            
+            // Créer l'input de filtre (caché par défaut)
+            const filterInput = document.createElement('input');
+            filterInput.type = 'text';
+            filterInput.className = 'column-filter-input';
+            filterInput.placeholder = this.config.labels.columnFilter;
+            filterInput.style.display = 'none';
+            filterContainer.appendChild(filterInput);
+            
+            // Ajouter le conteneur à l'en-tête
+            const headerWrapper = header.querySelector('.head-wrapper') || header;
+            headerWrapper.appendChild(filterContainer);
+            
+            // Gérer les événements
+            filterIcon.addEventListener('click', (e) => {
+                e.stopPropagation();
+                filterInput.style.display = filterInput.style.display === 'none' ? 'block' : 'none';
+                if (filterInput.style.display === 'block') {
+                    filterInput.focus();
+                }
+            });
+            
+            filterInput.addEventListener('input', (e) => {
+                e.stopPropagation();
+                
+                if (this.filterTimeout) {
+                    clearTimeout(this.filterTimeout);
+                }
+                
+                this.filterTimeout = setTimeout(() => {
+                    const value = e.target.value.toLowerCase().trim();
+                    
+                    // Stocker ou supprimer le filtre selon qu'il est vide ou non
+                    if (value) {
+                        this.columnFilters.set(index, value);
+                        header.classList.add('filtered');
+                    } else {
+                        this.columnFilters.delete(index);
+                        header.classList.remove('filtered');
+                    }
+                    
+                    this.currentPage = 1;
+                    this.refresh();
+                }, this.config.debounceTime);
+            });
+            
+            // Empêcher la propagation des événements clavier
+            filterInput.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+            });
         });
     }
 
@@ -225,16 +345,50 @@ export default class FilterAndPaginatePlugin {
 
     getFilteredRows() {
         const rows = Array.from(this.table.getAllRows());
+        const hasGlobalFilter = this.filterValue && this.filterValue.length > 0;
+        const hasColumnFilters = this.columnFilters.size > 0;
         
-        if (!this.filterValue) {
+        // Si aucun filtre n'est actif, retourner toutes les lignes
+        if (!hasGlobalFilter && !hasColumnFilters) {
             return rows;
         }
 
+        // Récupérer les colonnes à exclure du filtrage
+        const excludeColumns = Array.from(this.table.table.querySelectorAll(`th[${this.config.filterExcludeAttribute}], th[th-sql-exclude], th[th-hide]`))
+            .map(th => Array.from(this.table.table.querySelectorAll('th')).indexOf(th));
+        
+        this.debug('Colonnes exclues du filtrage:', excludeColumns);
+
         return rows.filter(row => {
-            return Array.from(row.cells).some(cell => {
-                const value = this.getCellValue(cell);
-                return value.toLowerCase().includes(this.filterValue);
-            });
+            // Vérifier le filtre global
+            if (hasGlobalFilter) {
+                const matchesGlobal = Array.from(row.cells).some((cell, index) => {
+                    // Ignorer les colonnes exclues
+                    if (excludeColumns.includes(index)) {
+                        return false;
+                    }
+                    const value = this.getCellValue(cell);
+                    return value.toLowerCase().includes(this.filterValue);
+                });
+                
+                if (!matchesGlobal) return false;
+            }
+            
+            // Vérifier les filtres par colonne
+            if (hasColumnFilters) {
+                for (const [columnIndex, filterValue] of this.columnFilters.entries()) {
+                    if (columnIndex >= row.cells.length) continue;
+                    
+                    const cell = row.cells[columnIndex];
+                    const value = this.getCellValue(cell);
+                    
+                    if (!value.toLowerCase().includes(filterValue)) {
+                        return false;
+                    }
+                }
+            }
+            
+            return true;
         });
     }
 
@@ -246,9 +400,35 @@ export default class FilterAndPaginatePlugin {
         if (filterValue !== null) {
             return filterValue;
         }
-
-        // Sinon utiliser le contenu de la cellule
-        return cell.textContent.trim();
+        
+        // Vérifier si la cellule a un type de données spécifique
+        const dataType = cell.getAttribute('data-type');
+        
+        // Récupérer le contenu brut de la cellule
+        const rawContent = cell.textContent.trim();
+        
+        // Traitement spécifique selon le type de données
+        if (dataType === 'date') {
+            // Pour les dates, on pourrait normaliser le format pour une meilleure recherche
+            try {
+                const date = new Date(rawContent);
+                if (!isNaN(date.getTime())) {
+                    // Format ISO pour une recherche cohérente
+                    return date.toISOString();
+                }
+            } catch (e) {
+                this.debug('Erreur lors de la conversion de la date:', e);
+            }
+        } else if (dataType === 'number') {
+            // Pour les nombres, on pourrait normaliser le format
+            const num = parseFloat(rawContent.replace(/[^0-9.-]+/g, ''));
+            if (!isNaN(num)) {
+                return num.toString();
+            }
+        }
+        
+        // Par défaut, retourner le contenu textuel
+        return rawContent;
     }
 
     goToPage(page) {
@@ -269,12 +449,12 @@ export default class FilterAndPaginatePlugin {
         this.table.table.dispatchEvent(event);
     }
 
-    refresh() {
+    refresh(keepPage = false) {
         const filteredRows = this.getFilteredRows();
         this.totalPages = Math.ceil(filteredRows.length / this.config.pageSize);
 
         // Ajuster la page courante si nécessaire
-        if (this.currentPage > this.totalPages) {
+        if (!keepPage || this.currentPage > this.totalPages) {
             this.currentPage = this.totalPages || 1;
         }
 
@@ -292,6 +472,52 @@ export default class FilterAndPaginatePlugin {
         // Mettre à jour la pagination et les infos
         this.updatePagination();
         this.updateInfo();
+        
+        // Déclencher un événement pour informer que le filtrage/pagination a été mis à jour
+        const event = new CustomEvent('filterAndPaginateUpdated', {
+            detail: {
+                filteredRowsCount: filteredRows.length,
+                totalRows: allRows.length,
+                currentPage: this.currentPage,
+                totalPages: this.totalPages,
+                pageSize: this.config.pageSize,
+                filterValue: this.filterValue
+            },
+            bubbles: true
+        });
+        this.table.table.dispatchEvent(event);
+    }
+
+    // Méthode pour sauvegarder l'état actuel
+    saveState() {
+        if (!this.config.rememberState) return;
+        
+        this.lastState = {
+            currentPage: this.currentPage,
+            pageSize: this.config.pageSize,
+            filterValue: this.filterValue,
+            columnFilters: new Map(this.columnFilters)
+        };
+    }
+
+    // Méthode pour restaurer l'état précédent
+    restoreState() {
+        if (!this.config.rememberState || !this.lastState) return false;
+        
+        this.currentPage = this.lastState.currentPage;
+        this.config.pageSize = this.lastState.pageSize;
+        this.filterValue = this.lastState.filterValue;
+        this.columnFilters = new Map(this.lastState.columnFilters);
+        
+        // Mettre à jour l'interface utilisateur
+        if (this.config.globalFilter) {
+            const input = document.querySelector(this.config.globalFilter);
+            if (input) {
+                input.value = this.filterValue;
+            }
+        }
+        
+        return true;
     }
 
     destroy() {

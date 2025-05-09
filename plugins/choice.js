@@ -2,25 +2,27 @@
  * Plugin Choice pour TableFlow
  * Permet de gérer des sélections de valeurs avec deux modes :
  * - toggle : basculement direct entre les options par clic
- * - searchable : recherche et sélection dans une liste déroulante
+ * - searchable : recherche et sélection dans une liste déroulante avec support AJAX
  */
 export default class ChoicePlugin {
     constructor(config = {}) {
         this.name = 'choice';
-        this.version = '2.0.1';  // Mise à jour de la version
+        this.version = '3.0.0';  // Mise à jour de la version
         this.type = 'edit';
         this.table = null;
         this.dependencies = [];
         this.activeDropdown = null;
+        this.debounceTimers = new Map(); // Pour stocker les timers de debounce
 
-        // Configuration par défaut
+        // Configuration par défaut pour le mode searchable
         this.defaultSearchableConfig = {
             minWidth: '200px',
             dropdownClass: 'choice-dropdown',
             optionClass: 'choice-option',
             searchClass: 'choice-search',
             placeholder: 'Rechercher...',
-            noResultsText: 'Aucun résultat'
+            noResultsText: 'Aucun résultat',
+            loadingText: 'Chargement...'
         };
 
         // Configuration unifiée
@@ -45,12 +47,13 @@ export default class ChoicePlugin {
             () => { };
 
         // Ajouter les styles CSS
-        this.addSearchableStyles();
+        this.addStyles();
 
         // Lier les méthodes pour préserver le contexte
         this.handleClick = this.handleClick.bind(this);
         this.handleToggleClick = this.handleToggleClick.bind(this);
         this.handleSearchableClick = this.handleSearchableClick.bind(this);
+        this.handleDocumentClick = this.handleDocumentClick.bind(this);
     }
 
     getColumnConfig(columnId) {
@@ -90,6 +93,25 @@ export default class ChoicePlugin {
             }
         }
 
+        // Configuration par défaut pour AJAX
+        const defaultAjaxConfig = {
+            enabled: false,
+            url: null,
+            method: 'GET',
+            headers: {},
+            minChars: 3,
+            debounceTime: 300,
+            paramName: 'query',
+            responseParser: null,
+            extraParams: {}
+        };
+
+        // Configuration par défaut pour l'auto-remplissage
+        const defaultAutoFillConfig = {
+            enabled: false,
+            mappings: {}
+        };
+
         return {
             type: columnConfig.type || 'toggle',
             values: columnConfig.values || [],
@@ -97,6 +119,14 @@ export default class ChoicePlugin {
             searchable: {
                 ...this.defaultSearchableConfig,
                 ...(columnConfig.searchable || {})
+            },
+            ajax: {
+                ...defaultAjaxConfig,
+                ...(columnConfig.ajax || {})
+            },
+            autoFill: {
+                ...defaultAutoFillConfig,
+                ...(columnConfig.autoFill || {})
             }
         };
     }
@@ -105,6 +135,7 @@ export default class ChoicePlugin {
         const dropdown = document.createElement('div');
         const columnConfig = this.getColumnConfig(columnId);
         const searchableConfig = columnConfig.searchable || this.defaultSearchableConfig;
+        const ajaxConfig = columnConfig.ajax || {};
 
         dropdown.className = searchableConfig.dropdownClass || this.defaultSearchableConfig.dropdownClass;
         dropdown.style.minWidth = searchableConfig.minWidth || this.defaultSearchableConfig.minWidth;
@@ -119,22 +150,107 @@ export default class ChoicePlugin {
         // Conteneur pour les options
         const optionsContainer = document.createElement('div');
         optionsContainer.className = 'options-container';
-
-        // Ajouter les options
-        this.renderSearchableOptions(optionsContainer, choices, cell, columnId);
         dropdown.appendChild(optionsContainer);
+
+        // Afficher les options initiales si disponibles et si AJAX n'est pas activé
+        if (choices && choices.length && (!ajaxConfig.enabled || ajaxConfig.loadInitialOptions)) {
+            this.renderSearchableOptions(optionsContainer, choices, cell, columnId);
+        }
+
+        // Variable pour stocker l'ID du timer de debounce
+        const debounceKey = `${columnId}_${cell.id}`;
 
         // Gestionnaire de recherche
         searchInput.addEventListener('input', () => {
             const searchText = searchInput.value.toLowerCase();
-            const filteredChoices = choices.filter(choice => {
-                const label = typeof choice === 'object' ? choice.label : choice;
-                return label.toLowerCase().includes(searchText);
-            });
-            this.renderSearchableOptions(optionsContainer, filteredChoices, cell, columnId);
+            
+            // Effacer le timer précédent
+            if (this.debounceTimers.has(debounceKey)) {
+                clearTimeout(this.debounceTimers.get(debounceKey));
+            }
+            
+            // Si AJAX est activé et qu'on a assez de caractères
+            if (ajaxConfig.enabled && searchText.length >= (ajaxConfig.minChars || 3)) {
+                // Afficher un indicateur de chargement
+                optionsContainer.innerHTML = `<div class="loading">${searchableConfig.loadingText || 'Chargement...'}</div>`;
+                
+                // Attendre avant d'envoyer la requête
+                const timerId = setTimeout(() => {
+                    this.fetchOptionsFromAjax(searchText, columnId)
+                        .then(results => {
+                            this.renderSearchableOptions(optionsContainer, results, cell, columnId);
+                        })
+                        .catch(error => {
+                            this.debug('Erreur lors de la recherche AJAX:', error);
+                            optionsContainer.innerHTML = '<div class="error">Erreur de chargement</div>';
+                        });
+                }, ajaxConfig.debounceTime || 300);
+                
+                this.debounceTimers.set(debounceKey, timerId);
+            } 
+            // Sinon, filtrer les options locales
+            else if (choices && choices.length) {
+                const filteredChoices = choices.filter(choice => {
+                    const label = typeof choice === 'object' ? choice.label : choice;
+                    return label.toLowerCase().includes(searchText);
+                });
+                this.renderSearchableOptions(optionsContainer, filteredChoices, cell, columnId);
+            }
         });
 
         return dropdown;
+    }
+
+    async fetchOptionsFromAjax(query, columnId) {
+        const columnConfig = this.getColumnConfig(columnId);
+        if (!columnConfig || !columnConfig.ajax || !columnConfig.ajax.enabled) {
+            return [];
+        }
+        
+        const ajaxConfig = columnConfig.ajax;
+        if (!ajaxConfig.url) {
+            this.debug('URL AJAX non définie pour la colonne', columnId);
+            return [];
+        }
+        
+        try {
+            // Construire l'URL avec les paramètres
+            const url = new URL(ajaxConfig.url, window.location.origin);
+            
+            // Ajouter le terme de recherche
+            url.searchParams.append(ajaxConfig.paramName || 'query', query);
+            
+            // Ajouter les paramètres supplémentaires
+            if (ajaxConfig.extraParams) {
+                Object.entries(ajaxConfig.extraParams).forEach(([key, value]) => {
+                    url.searchParams.append(key, value);
+                });
+            }
+            
+            // Effectuer la requête
+            const response = await fetch(url, {
+                method: ajaxConfig.method || 'GET',
+                headers: ajaxConfig.headers || {},
+                cache: 'no-cache'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Erreur HTTP: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            // Parser la réponse si une fonction de parsing est définie
+            if (typeof ajaxConfig.responseParser === 'function') {
+                return ajaxConfig.responseParser(data);
+            }
+            
+            // Format par défaut attendu: tableau d'objets avec value et label
+            return data;
+        } catch (error) {
+            this.debug('Erreur lors de la récupération des options:', error);
+            throw error;
+        }
     }
 
     renderSearchableOptions(container, choices, cell, columnId) {
@@ -142,7 +258,7 @@ export default class ChoicePlugin {
         const columnConfig = this.getColumnConfig(columnId);
         const searchableConfig = columnConfig.searchable || this.defaultSearchableConfig;
 
-        if (!choices.length) {
+        if (!choices || !choices.length) {
             const noResults = document.createElement('div');
             noResults.className = 'no-results';
             noResults.textContent = searchableConfig.noResultsText || this.defaultSearchableConfig.noResultsText;
@@ -151,8 +267,14 @@ export default class ChoicePlugin {
         }
 
         choices.forEach(choice => {
+            // Extraire les valeurs et les données additionnelles
             const value = typeof choice === 'object' ? choice.value : choice;
             const label = typeof choice === 'object' ? choice.label : choice;
+            
+            // Récupérer toutes les données additionnelles (pour l'auto-remplissage)
+            const additionalData = typeof choice === 'object' ? { ...choice } : {};
+            delete additionalData.value;
+            delete additionalData.label;
 
             // Ne pas afficher les options en lecture seule
             if (this.isReadOnly(columnId, value)) {
@@ -164,7 +286,7 @@ export default class ChoicePlugin {
             optionElement.innerHTML = label;
 
             optionElement.addEventListener('click', () => {
-                this.updateCellValue(cell, value, label, columnId);
+                this.updateCellValue(cell, value, label, columnId, additionalData);
                 this.closeAllDropdowns();
             });
 
@@ -190,7 +312,7 @@ export default class ChoicePlugin {
         return false;
     }
 
-    addSearchableStyles() {
+    addStyles() {
         if (!document.getElementById('choice-plugin-styles')) {
             const style = document.createElement('style');
             style.id = 'choice-plugin-styles';
@@ -231,11 +353,14 @@ export default class ChoicePlugin {
                 .${this.defaultSearchableConfig.optionClass}:hover {
                     background-color: #f5f5f5;
                 }
-                .no-results {
+                .no-results, .loading, .error {
                     padding: 8px;
                     color: #999;
                     font-style: italic;
                     text-align: center;
+                }
+                .error {
+                    color: #e74c3c;
                 }
             `;
             document.head.appendChild(style);
@@ -292,7 +417,7 @@ export default class ChoicePlugin {
         cell.classList.add(this.config.cellClass);
         cell.setAttribute('data-plugin', 'choice');
         cell.setAttribute('data-choice-type', type);
-        cell.setAttribute('data-choice-column', columnId);  // Nouvelle attribution
+        cell.setAttribute('data-choice-column', columnId);
 
         const columnConfig = this.getColumnConfig(columnId);
         if (!columnConfig) return;
@@ -336,11 +461,7 @@ export default class ChoicePlugin {
         this.table.table.addEventListener('click', this.handleClick);
 
         // Fermer le dropdown quand on clique ailleurs
-        document.addEventListener('click', (event) => {
-            if (!event.target.closest(`.${this.config.cellClass}`)) {
-                this.closeAllDropdowns();
-            }
-        });
+        document.addEventListener('click', this.handleDocumentClick);
 
         // Écouter l'événement cell:saved
         this.table.table.addEventListener('cell:saved', (event) => {
@@ -387,6 +508,13 @@ export default class ChoicePlugin {
             this.debug('row:added event received');
             this.setupChoiceCells();
         });
+    }
+
+    handleDocumentClick(event) {
+        if (!event.target.closest(`.${this.config.cellClass}`) && 
+            !event.target.closest(`.${this.defaultSearchableConfig.dropdownClass}`)) {
+            this.closeAllDropdowns();
+        }
     }
 
     handleClick(event) {
@@ -443,7 +571,12 @@ export default class ChoicePlugin {
             });
         }
 
-        this.updateCellValue(cell, nextValue, nextLabel, columnId);
+        // Extraire les données additionnelles pour l'auto-remplissage
+        const additionalData = typeof nextChoice === 'object' ? { ...nextChoice } : {};
+        delete additionalData.value;
+        delete additionalData.label;
+
+        this.updateCellValue(cell, nextValue, nextLabel, columnId, additionalData);
     }
 
     handleSearchableClick(cell) {
@@ -451,13 +584,17 @@ export default class ChoicePlugin {
         const columnConfig = this.getColumnConfig(columnId);
         if (!columnConfig) return;
 
-        const choices = columnConfig.values;
-        if (!choices || !choices.length) return;
-
         // Fermer les autres dropdowns
         this.closeAllDropdowns();
 
+        // Si le dropdown est déjà ouvert pour cette cellule, le fermer
+        if (cell.querySelector(`.${this.defaultSearchableConfig.dropdownClass}`)) {
+            this.closeAllDropdowns();
+            return;
+        }
+
         // Créer et afficher le dropdown
+        const choices = columnConfig.values || [];
         const dropdown = this.createSearchableDropdown(cell, choices, columnId);
         cell.appendChild(dropdown);
         dropdown.classList.add('active');
@@ -468,10 +605,24 @@ export default class ChoicePlugin {
         if (searchInput) {
             searchInput.focus();
         }
+
+        // Si AJAX est activé et loadOnFocus est true, charger les options
+        if (columnConfig.ajax && columnConfig.ajax.enabled && columnConfig.ajax.loadOnFocus) {
+            const optionsContainer = dropdown.querySelector('.options-container');
+            optionsContainer.innerHTML = `<div class="loading">${columnConfig.searchable.loadingText || 'Chargement...'}</div>`;
+            
+            this.fetchOptionsFromAjax('', columnId)
+                .then(results => {
+                    this.renderSearchableOptions(optionsContainer, results, cell, columnId);
+                })
+                .catch(error => {
+                    this.debug('Erreur lors du chargement initial AJAX:', error);
+                    optionsContainer.innerHTML = '<div class="error">Erreur de chargement</div>';
+                });
+        }
     }
 
-    // Méthode updateCellValue corrigée pour éviter la double exécution
-    updateCellValue(cell, value, label, columnId) {
+    updateCellValue(cell, value, label, columnId, additionalData = {}) {
         // Mettre à jour la cellule
         cell.setAttribute('data-value', value);
 
@@ -496,8 +647,48 @@ export default class ChoicePlugin {
         const isModified = value !== initialValue;
         const row = cell.closest('tr');
 
-        // Important : Créer un identifiant unique pour cet événement
-        const eventId = `change_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Gérer l'auto-remplissage si configuré
+        const columnConfig = this.getColumnConfig(columnId);
+        if (columnConfig && columnConfig.autoFill && columnConfig.autoFill.enabled && row) {
+            const mappings = columnConfig.autoFill.mappings || {};
+            
+            // Pour chaque mapping défini
+            Object.entries(mappings).forEach(([sourceField, targetColumnId]) => {
+                // Récupérer la valeur à partir des données additionnelles
+                const fillValue = additionalData[sourceField];
+                if (fillValue !== undefined) {
+                    // Trouver la cellule cible dans la même ligne
+                    const targetCell = row.querySelector(`td[id^="${targetColumnId}_"]`);
+                    if (targetCell) {
+                        // Mettre à jour la valeur de la cellule cible
+                        targetCell.setAttribute('data-value', fillValue);
+                        
+                        // Mettre à jour l'affichage si nécessaire
+                        const targetWrapper = targetCell.querySelector('.cell-wrapper');
+                        if (targetWrapper) {
+                            targetWrapper.textContent = fillValue;
+                        } else {
+                            targetCell.textContent = fillValue;
+                        }
+                        
+                        // Déclencher un événement de changement pour cette cellule
+                        const targetEvent = new CustomEvent('cell:change', {
+                            detail: {
+                                cell: targetCell,
+                                value: fillValue,
+                                columnId: targetColumnId,
+                                rowId: row.id,
+                                source: 'choice-autofill',
+                                tableId: this.table.table.id,
+                                isModified: true
+                            },
+                            bubbles: true
+                        });
+                        this.table.table.dispatchEvent(targetEvent);
+                    }
+                }
+            });
+        }
 
         // Créer l'événement avec bubbles:true pour permettre sa propagation
         const changeEvent = new CustomEvent('cell:change', {
@@ -508,28 +699,38 @@ export default class ChoicePlugin {
                 rowId: row?.id,
                 source: 'choice',
                 tableId: this.table.table.id,
-                isModified,
-                eventId  // Ajouter un identifiant unique pour détecter les doublons
+                isModified
             },
-            bubbles: true  // Permettre la remontée de l'événement
+            bubbles: true
         });
 
-        // Ne dispatcher l'événement qu'une seule fois, sur la table
+        // Dispatcher l'événement sur la table
         this.table.table.dispatchEvent(changeEvent);
 
         // Mettre à jour la classe modified sur la ligne
         if (isModified && row) {
             row.classList.add(this.config.modifiedClass);
-        } else if (row) {
-            row.classList.remove(this.config.modifiedClass);
+        } else if (!isModified && row) {
+            // Vérifier si d'autres cellules sont modifiées avant de retirer la classe
+            const otherModifiedCells = Array.from(row.cells).some(otherCell => {
+                if (otherCell === cell) return false;
+                const otherInitialValue = otherCell.getAttribute('data-initial-value');
+                const otherCurrentValue = otherCell.getAttribute('data-value');
+                return otherInitialValue !== otherCurrentValue;
+            });
+            
+            if (!otherModifiedCells) {
+                row.classList.remove(this.config.modifiedClass);
+            }
         }
     }
 
     closeAllDropdowns() {
-        if (this.activeDropdown) {
-            this.activeDropdown.remove();
-            this.activeDropdown = null;
-        }
+        const dropdowns = document.querySelectorAll(`.${this.defaultSearchableConfig.dropdownClass}.active`);
+        dropdowns.forEach(dropdown => {
+            dropdown.remove();
+        });
+        this.activeDropdown = null;
     }
 
     isManagedCell(cell) {
@@ -544,6 +745,13 @@ export default class ChoicePlugin {
         if (this.table?.table) {
             this.table.table.removeEventListener('click', this.handleClick);
         }
+        document.removeEventListener('click', this.handleDocumentClick);
         this.closeAllDropdowns();
+        
+        // Nettoyer les timers de debounce
+        this.debounceTimers.forEach(timerId => {
+            clearTimeout(timerId);
+        });
+        this.debounceTimers.clear();
     }
 }

@@ -739,10 +739,18 @@ export default class TableFlow {
 
     notify(type, message) {
         try {
+            // Prevent infinite recursion by checking if we're already in a notification
+            if (this._inNotification) {
+                return;
+            }
+            
+            this._inNotification = true;
             if (this.notifications && typeof this.notifications[type] === 'function') {
                 this.notifications[type](message);
             }
+            this._inNotification = false;
         } catch (error) {
+            this._inNotification = false;
             console.error(`[TableFlow] Erreur lors de la notification (${type}): ${error.message}`);
         }
     }

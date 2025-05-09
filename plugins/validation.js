@@ -1,7 +1,7 @@
 export default class ValidationPlugin {
     constructor(config = {}) {
         this.name = 'validation';
-        this.version = '1.0.0';
+        this.version = '1.1.0';
         this.type = 'validation';
         this.table = null;
         this.editPlugin = null;
@@ -116,9 +116,13 @@ export default class ValidationPlugin {
     }
     
     registerWithEditPlugin() {
+        // Stocker les références liées pour pouvoir les supprimer plus tard
+        this.boundValidateBeforeSave = this.validateBeforeSave.bind(this);
+        this.boundSetupValidationForInput = this.setupValidationForInput.bind(this);
+        
         // S'accrocher aux hooks du plugin Edit
-        this.editPlugin.addHook('beforeSave', this.validateBeforeSave.bind(this));
-        this.editPlugin.addHook('afterEdit', this.setupValidationForInput.bind(this));
+        this.editPlugin.addHook('beforeSave', this.boundValidateBeforeSave);
+        this.editPlugin.addHook('afterEdit', this.boundSetupValidationForInput);
     }
     
     // Détection des colonnes avec validation
@@ -258,6 +262,29 @@ export default class ValidationPlugin {
     }
     
     destroy() {
-        // Rien à détruire spécifiquement
+        // Se désabonner des hooks du plugin Edit
+        if (this.editPlugin && this.editPlugin.hooks) {
+            // Utiliser les références liées stockées
+            if (this.boundValidateBeforeSave && this.editPlugin.hooks.beforeSave) {
+                const beforeSaveIndex = this.editPlugin.hooks.beforeSave.indexOf(this.boundValidateBeforeSave);
+                if (beforeSaveIndex !== -1) {
+                    this.editPlugin.hooks.beforeSave.splice(beforeSaveIndex, 1);
+                    this.debug('Hook beforeSave supprimé avec succès');
+                }
+            }
+            
+            if (this.boundSetupValidationForInput && this.editPlugin.hooks.afterEdit) {
+                const afterEditIndex = this.editPlugin.hooks.afterEdit.indexOf(this.boundSetupValidationForInput);
+                if (afterEditIndex !== -1) {
+                    this.editPlugin.hooks.afterEdit.splice(afterEditIndex, 1);
+                    this.debug('Hook afterEdit supprimé avec succès');
+                }
+            }
+        }
+        
+        // Nettoyer les références
+        this.validateColumns.clear();
+        this.boundValidateBeforeSave = null;
+        this.boundSetupValidationForInput = null;
     }
 }

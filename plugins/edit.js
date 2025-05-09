@@ -1,7 +1,7 @@
 export default class EditPlugin {
     constructor(config = {}) {
         this.name = 'edit';
-        this.version = '2.0.0';
+        this.version = '2.1.0';
         this.type = 'edit';
         this.table = null;
         this.dependencies = [];
@@ -19,10 +19,14 @@ export default class EditPlugin {
         // Configuration de base
         this.config = {
             editAttribute: 'th-edit',
+            textareaAttribute: 'th-textarea', // Nouvel attribut pour les champs textarea
             cellClass: 'td-edit',
             readOnlyClass: 'readonly',
             inputClass: 'edit-input',
+            textareaClass: 'edit-textarea', // Nouvelle classe pour les textarea
             modifiedClass: 'modified',
+            textareaRows: 4, // Nombre de lignes par défaut pour les textarea
+            textareaColumns: 40, // Nombre de colonnes par défaut pour les textarea
             debug: false
         };
         
@@ -57,14 +61,15 @@ export default class EditPlugin {
             .filter(header => header.hasAttribute(this.config.editAttribute))
             .map(header => ({
                 id: header.id,
-                index: Array.from(headerCells).indexOf(header)
+                index: Array.from(headerCells).indexOf(header),
+                isTextarea: header.hasAttribute(this.config.textareaAttribute)
             }));
 
         if (!editColumns.length) return;
 
         const rows = this.table.table.querySelectorAll('tbody tr');
         rows.forEach(row => {
-            editColumns.forEach(({id: columnId, index}) => {
+            editColumns.forEach(({id: columnId, index, isTextarea}) => {
                 const cell = row.cells[index];
                 if (!cell) return;
 
@@ -75,6 +80,13 @@ export default class EditPlugin {
 
                 cell.classList.add(this.config.cellClass);
                 cell.setAttribute('data-plugin', 'edit');
+                
+                // Marquer les cellules qui utiliseront un textarea
+                if (isTextarea) {
+                    cell.setAttribute('data-edit-type', 'textarea');
+                } else {
+                    cell.setAttribute('data-edit-type', 'input');
+                }
 
                 // Ajouter le gestionnaire de double-clic s'il n'existe pas déjà
                 if (!cell.hasAttribute('data-edit-initialized')) {
@@ -185,7 +197,7 @@ export default class EditPlugin {
 
     startEditing(event) {
         const cell = event.target.closest('td');
-        if (!cell || cell.querySelector('input')) return;
+        if (!cell || cell.querySelector('input') || cell.querySelector('textarea')) return;
 
         // Vérifier si la cellule est bien gérée par ce plugin
         if (cell.getAttribute('data-plugin') !== 'edit') {
@@ -211,28 +223,52 @@ export default class EditPlugin {
     }
 
     createEditField(cell, wrapper, currentValue) {
-        // Créer un input standard
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = this.config.inputClass;
-        input.value = currentValue;
+        let inputElement;
+        const isTextarea = cell.getAttribute('data-edit-type') === 'textarea';
         
-        // Vider le wrapper et ajouter l'input
+        if (isTextarea) {
+            // Créer un textarea
+            inputElement = document.createElement('textarea');
+            inputElement.className = this.config.textareaClass;
+            inputElement.rows = this.config.textareaRows;
+            inputElement.cols = this.config.textareaColumns;
+            inputElement.value = currentValue;
+            
+            // Ajuster la hauteur du textarea en fonction du contenu
+            const lineCount = (currentValue.match(/\\n/g) || []).length + 1;
+            if (lineCount > this.config.textareaRows) {
+                inputElement.rows = Math.min(lineCount, this.config.textareaRows * 2);
+            }
+            
+            this.debug('Creating textarea editor');
+        } else {
+            // Créer un input standard
+            inputElement = document.createElement('input');
+            inputElement.type = 'text';
+            inputElement.className = this.config.inputClass;
+            inputElement.value = currentValue;
+            
+            this.debug('Creating input editor');
+        }
+        
+        // Vider le wrapper et ajouter l'élément d'édition
         wrapper.innerHTML = '';
-        wrapper.appendChild(input);
+        wrapper.appendChild(inputElement);
         
         // Focus et sélection
-        input.focus();
-        input.select();
+        inputElement.focus();
+        if (!isTextarea) {
+            inputElement.select();
+        }
         
         // Ajout des événements de base
-        input.addEventListener('blur', () => this.finishEditing(cell, input));
-        input.addEventListener('keydown', (e) => this.handleKeydown(e, cell, input));
+        inputElement.addEventListener('blur', () => this.finishEditing(cell, inputElement));
+        inputElement.addEventListener('keydown', (e) => this.handleKeydown(e, cell, inputElement));
         
         // Point d'extension après création du champ d'édition
-        this.executeHook('afterEdit', cell, input, currentValue);
+        this.executeHook('afterEdit', cell, inputElement, currentValue);
         
-        return input;
+        return inputElement;
     }
 
     handleKeydown(event, cell, input) {
@@ -241,8 +277,15 @@ export default class EditPlugin {
             return;
         }
         
+        const isTextarea = input.tagName.toLowerCase() === 'textarea';
+        
         // Gestion standard des touches
-        if (event.key === 'Enter') {
+        if (event.key === 'Enter' && !isTextarea) {
+            // Pour les inputs, Enter valide l'édition
+            this.finishEditing(cell, input);
+            event.preventDefault();
+        } else if (event.key === 'Enter' && isTextarea && event.ctrlKey) {
+            // Pour les textareas, Ctrl+Enter valide l'édition
             this.finishEditing(cell, input);
             event.preventDefault();
         } else if (event.key === 'Escape') {

@@ -1,7 +1,7 @@
 export default class ActionsPlugin {
     constructor(config = {}) {
         this.name = 'actions';
-        this.version = '1.1.0';
+        this.version = '1.2.0'; // Version mise à jour
         this.type = 'action';
         this.table = null;
         this.dependencies = [];
@@ -28,7 +28,13 @@ export default class ActionsPlugin {
             actions: {},
             icons: {},
             confirmMessages: {},
-            autoSave: false
+            autoSave: false,
+            // Nouvelles options
+            actionButtonClass: 'action-button', // Classe pour les boutons d'action
+            actionButtonActiveClass: 'active',  // Classe pour les boutons actifs
+            actionButtonDisabledClass: 'disabled', // Classe pour les boutons désactivés
+            tooltipAttribute: 'data-tooltip',   // Attribut pour les tooltips
+            tooltipPosition: 'top',            // Position par défaut des tooltips (top, bottom, left, right)
         };
     }
 
@@ -196,7 +202,18 @@ export default class ActionsPlugin {
                 return;
             }
 
+            // Ajouter la classe de bouton d'action
+            actionElement.classList.add(this.config.actionButtonClass);
+            
+            // Configurer l'action
             actionElement.setAttribute('data-action', actionName);
+            
+            // Ajouter un tooltip si défini
+            if (actionConfig.tooltip) {
+                actionElement.setAttribute(this.config.tooltipAttribute, actionConfig.tooltip);
+                actionElement.setAttribute('data-tooltip-position', actionConfig.tooltipPosition || this.config.tooltipPosition);
+            }
+            
             const computedStyle = window.getComputedStyle(actionElement);
             const originalDisplay = computedStyle.display || 'inline-block';
             actionElement.setAttribute('data-original-display', originalDisplay);
@@ -211,9 +228,26 @@ export default class ActionsPlugin {
                 actionElement.style.display = 'none';
             }
 
+            // Désactiver le bouton si nécessaire
+            if (actionConfig.isDisabled && typeof actionConfig.isDisabled === 'function') {
+                const row = cell.closest('tr');
+                const data = this.getRowData(row);
+                if (actionConfig.isDisabled(data, row)) {
+                    actionElement.classList.add(this.config.actionButtonDisabledClass);
+                    actionElement.setAttribute('disabled', 'disabled');
+                }
+            }
+
             actionElement.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                
+                // Ne pas exécuter si le bouton est désactivé
+                if (actionElement.classList.contains(this.config.actionButtonDisabledClass) || 
+                    actionElement.hasAttribute('disabled')) {
+                    return;
+                }
+                
                 this.executeAction(actionName, e.target.closest('td'));
             });
         });
@@ -269,6 +303,15 @@ export default class ActionsPlugin {
             options: options
         });
 
+        // Vérifier si l'action est désactivée
+        if (actionConfig.isDisabled && typeof actionConfig.isDisabled === 'function') {
+            const data = this.getRowData(row);
+            if (actionConfig.isDisabled(data, row)) {
+                this.debug(`Action "${actionName}" désactivée pour cette ligne`);
+                return;
+            }
+        }
+
         if (this.config.confirmMessages[actionName] && !options.skipConfirm) {
             const message = this.config.confirmMessages[actionName];
             this.debug(`Demande de confirmation pour "${actionName}":`, message);
@@ -286,19 +329,63 @@ export default class ActionsPlugin {
             cell,
             tableHandler: this.table,
             data,
-            source: options.source || 'manual'
+            source: options.source || 'manual',
+            // Ajouter des méthodes utilitaires au contexte
+            utils: {
+                markRowAsSaved: (options) => this.markRowAsSaved(row, options),
+                updateActionButtons: (options) => this.updateActionButtons(row, options),
+                refreshRow: () => this.refreshRow(row)
+            }
         };
 
         try {
+            // Ajouter la classe active pendant l'exécution
+            const actionButton = cell.querySelector(`[data-action="${actionName}"]`);
+            if (actionButton) {
+                actionButton.classList.add(this.config.actionButtonActiveClass);
+            }
+
+            // Exécuter l'action
             if (typeof actionConfig.handler === 'function') {
                 this.debug(`Appel du handler pour "${actionName}" (source: ${context.source})`);
-                actionConfig.handler(context);
+                
+                // Supporter les handlers asynchrones
+                const result = actionConfig.handler(context);
+                
+                if (result instanceof Promise) {
+                    result
+                        .then(() => {
+                            if (actionButton) {
+                                actionButton.classList.remove(this.config.actionButtonActiveClass);
+                            }
+                        })
+                        .catch(error => {
+                            console.error(`Erreur lors de l'exécution de l'action "${actionName}":`, error);
+                            if (actionButton) {
+                                actionButton.classList.remove(this.config.actionButtonActiveClass);
+                            }
+                        });
+                } else {
+                    // Pour les handlers synchrones
+                    if (actionButton) {
+                        actionButton.classList.remove(this.config.actionButtonActiveClass);
+                    }
+                }
             } else {
                 this.debug(`ERREUR: Pas de handler défini pour l'action "${actionName}"`);
+                if (actionButton) {
+                    actionButton.classList.remove(this.config.actionButtonActiveClass);
+                }
             }
         } catch (error) {
             this.debug(`ERREUR lors de l'exécution de l'action "${actionName}":`, error);
             console.error(`Erreur lors de l'exécution de l'action "${actionName}":`, error);
+            
+            // S'assurer de retirer la classe active en cas d'erreur
+            const actionButton = cell.querySelector(`[data-action="${actionName}"]`);
+            if (actionButton) {
+                actionButton.classList.remove(this.config.actionButtonActiveClass);
+            }
         }
     }
 
@@ -503,10 +590,14 @@ export default class ActionsPlugin {
             cell.classList.contains(this.config.cellClass)
         );
 
+        // Récupérer les données de la ligne pour vérifier les conditions de désactivation
+        const rowData = this.getRowData(row);
+
         actionCells.forEach(cell => {
             const buttons = cell.querySelectorAll('[data-action]');
             buttons.forEach(button => {
                 const actionName = button.getAttribute('data-action');
+                const actionConfig = this.config.actions[actionName] || {};
                 const originalDisplay = button.getAttribute('data-original-display') || 'inline-block';
 
                 let shouldShow = true;
@@ -521,6 +612,19 @@ export default class ActionsPlugin {
                 }
 
                 button.style.display = shouldShow ? originalDisplay : 'none';
+
+                // Mettre à jour l'état désactivé si nécessaire
+                if (actionConfig.isDisabled && typeof actionConfig.isDisabled === 'function') {
+                    const isDisabled = actionConfig.isDisabled(rowData, row);
+                    
+                    if (isDisabled) {
+                        button.classList.add(this.config.actionButtonDisabledClass);
+                        button.setAttribute('disabled', 'disabled');
+                    } else {
+                        button.classList.remove(this.config.actionButtonDisabledClass);
+                        button.removeAttribute('disabled');
+                    }
+                }
             });
         });
     }
@@ -607,6 +711,35 @@ export default class ActionsPlugin {
 
         this.debug('Déclenchement de l\'événement row:saved:', rowSavedEvent.detail);
         this.table.table.dispatchEvent(rowSavedEvent);
+    }
+
+    // Nouvelle méthode pour rafraîchir une ligne
+    refreshRow(row) {
+        if (!row) {
+            this.debug('ERREUR: Ligne non trouvée dans refreshRow');
+            return;
+        }
+
+        this.debug('Rafraîchissement de la ligne:', row.id);
+        
+        // Mettre à jour les boutons d'action
+        if (this.hasActionColumns()) {
+            // Vérifier si la ligne est modifiée
+            const isModified = row.classList.contains(this.config.modifiedClass);
+            this.updateActionButtons(row, { showOnModified: isModified });
+        }
+        
+        // Déclencher un événement de rafraîchissement
+        const refreshEvent = new CustomEvent('row:refresh', {
+            detail: {
+                row,
+                rowId: row.id,
+                tableId: this.table.table.id
+            },
+            bubbles: true
+        });
+        
+        this.table.table.dispatchEvent(refreshEvent);
     }
 
     refresh() {

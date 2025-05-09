@@ -132,12 +132,24 @@ export default class TextEditorPlugin {
         // Séparer le texte en phrases
         const sentences = this.splitIntoSentences(text);
         if (sentences.length <= 1) {
+            alert('Impossible de supprimer la seule phrase du texte');
             this.debug('Impossible de supprimer la seule phrase');
             return;
         }
         
-        // Supprimer la première phrase pour cet exemple
-        sentences.shift();
+        // Demander à l'utilisateur quelle phrase supprimer
+        const sentenceOptions = sentences.map((s, i) => `${i+1}: ${s.substring(0, 30)}${s.length > 30 ? '...' : ''}`);
+        const selectedIndex = prompt(`Quelle phrase souhaitez-vous supprimer?\n\n${sentenceOptions.join('\n')}\n\nEntrez le numéro de la phrase:`);
+        
+        // Vérifier l'entrée utilisateur
+        const index = parseInt(selectedIndex, 10) - 1;
+        if (isNaN(index) || index < 0 || index >= sentences.length) {
+            alert('Numéro de phrase invalide');
+            return;
+        }
+        
+        // Supprimer la phrase sélectionnée
+        sentences.splice(index, 1);
         
         // Reconstruire le texte
         const newText = sentences.join(' ');
@@ -192,9 +204,12 @@ export default class TextEditorPlugin {
     
     // Utilitaire: Séparation en phrases
     splitIntoSentences(text) {
-        // Regex simplifiée pour séparer en phrases
-        // Dans une implémentation réelle, cette regex devrait être plus sophistiquée
-        return text.split(/(?<=[.!?])\s+/);
+        if (!text) return [];
+        
+        // Regex améliorée pour séparer en phrases
+        // Prend en compte les points d'exclamation, d'interrogation et les points
+        // Gère également les cas où il n'y a pas d'espace après la ponctuation
+        return text.split(/(?<=[.!?])\s*/).filter(sentence => sentence.trim() !== '');
     }
     
     // Utilitaire: Mise à jour de la valeur de la cellule
@@ -263,9 +278,22 @@ export default class TextEditorPlugin {
     
     destroy() {
         // Se désabonner du hook onKeydown
-        if (this.editPlugin) {
-            // Idéalement, il faudrait une méthode removeHook dans EditPlugin
-            // Pour l'instant, nous ne pouvons pas nettoyer proprement
+        if (this.editPlugin && this.editPlugin.hooks && this.editPlugin.hooks.onKeydown) {
+            // Trouver et supprimer notre handler du tableau des hooks
+            const handlerIndex = this.editPlugin.hooks.onKeydown.findIndex(
+                handler => handler.toString().includes('handleKeydown')
+            );
+            
+            if (handlerIndex !== -1) {
+                this.editPlugin.hooks.onKeydown.splice(handlerIndex, 1);
+                this.debug('Hook onKeydown supprimé avec succès');
+            }
+        }
+        
+        // Se désinscrire du contextMenuPlugin si présent
+        if (this.contextMenuPlugin && typeof this.contextMenuPlugin.unregisterProvider === 'function') {
+            this.contextMenuPlugin.unregisterProvider(this);
+            this.debug('Désinscription du fournisseur de menu contextuel');
         }
     }
 }

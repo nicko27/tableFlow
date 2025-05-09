@@ -6,7 +6,7 @@
 export default class SelectionPlugin {
     constructor(config = {}) {
         this.name = 'select';
-        this.version = '1.0.0';
+        this.version = '1.1.0';
         this.type = 'action';
         this.table = null;
         this.dependencies = [];
@@ -1333,9 +1333,14 @@ export default class SelectionPlugin {
     destroy() {
         this.debug('Destruction du plugin');
         
-        // Supprimer les écouteurs d'événements
+        // Vérifier que la table existe encore
+        if (!this.table?.table) {
+            return;
+        }
+        
         const table = this.table.table;
         
+        // Supprimer les écouteurs d'événements avec les références liées
         table.removeEventListener('mousedown', this.handleMouseDown);
         table.removeEventListener('mouseover', this.handleMouseOver);
         document.removeEventListener('mouseup', this.handleMouseUp);
@@ -1360,5 +1365,9 @@ export default class SelectionPlugin {
         if (styles) {
             styles.remove();
         }
+        
+        // Nettoyer les références
+        this.selection = null;
+        this.table = null;
     }
 }

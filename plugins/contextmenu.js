@@ -1,7 +1,7 @@
 export default class ContextMenuPlugin {
     constructor(config = {}) {
         this.name = 'contextMenu';
-        this.version = '1.0.0';
+        this.version = '1.1.0';
         this.type = 'ui';
         this.table = null;
         
@@ -63,20 +63,23 @@ export default class ContextMenuPlugin {
     }
     
     setupEventListeners() {
-        // Écouter les événements de clic droit
-        this.table.table.addEventListener('contextmenu', this.handleContextMenu.bind(this));
-        
-        // Fermer le menu quand on clique ailleurs
-        document.addEventListener('click', () => {
-            this.hideMenu();
-        });
-        
-        // Fermer le menu avec Échap
-        document.addEventListener('keydown', (e) => {
+        // Stocker les références liées pour pouvoir les supprimer plus tard
+        this.boundHandleContextMenu = this.handleContextMenu.bind(this);
+        this.boundHideMenu = this.hideMenu.bind(this);
+        this.boundKeydownHandler = (e) => {
             if (e.key === 'Escape') {
                 this.hideMenu();
             }
-        });
+        };
+        
+        // Écouter les événements de clic droit
+        this.table.table.addEventListener('contextmenu', this.boundHandleContextMenu);
+        
+        // Fermer le menu quand on clique ailleurs
+        document.addEventListener('click', this.boundHideMenu);
+        
+        // Fermer le menu avec Échap
+        document.addEventListener('keydown', this.boundKeydownHandler);
     }
     
     handleContextMenu(event) {
@@ -110,6 +113,15 @@ export default class ContextMenuPlugin {
         this.providers.push(provider);
         this.debug(`Provider ${provider.name || 'unnamed'} registered`);
         
+        return this;
+    }
+    
+    unregisterProvider(provider) {
+        const index = this.providers.indexOf(provider);
+        if (index !== -1) {
+            this.providers.splice(index, 1);
+            this.debug(`Provider ${provider.name || 'unnamed'} unregistered`);
+        }
         return this;
     }
     
@@ -174,7 +186,7 @@ export default class ContextMenuPlugin {
                 menuItem.className = this.config.menuItemClass;
                 menuItem.innerHTML = `
                     ${item.icon ? `<span class="menu-icon">${item.icon}</span>` : ''}
-                    <span class="menu-label">${item.label}</span>
+                    <span class="menu-label">${item.label || ''}</span>
                 `;
                 
                 // Styles de base pour l'élément
@@ -192,26 +204,32 @@ export default class ContextMenuPlugin {
                     iconSpan.style.textAlign = 'center';
                 }
                 
-                // Hover
-                menuItem.addEventListener('mouseover', () => {
-                    menuItem.style.background = '#f5f5f5';
-                });
-                menuItem.addEventListener('mouseout', () => {
-                    menuItem.style.background = '';
-                });
-                
-                // Action
-                menuItem.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.hideMenu();
+                // Désactiver l'élément si spécifié
+                if (item.disabled) {
+                    menuItem.style.opacity = '0.5';
+                    menuItem.style.cursor = 'not-allowed';
+                } else {
+                    // Hover (seulement pour les éléments actifs)
+                    menuItem.addEventListener('mouseover', () => {
+                        menuItem.style.background = '#f5f5f5';
+                    });
+                    menuItem.addEventListener('mouseout', () => {
+                        menuItem.style.background = '';
+                    });
                     
-                    // Exécuter l'action via le fournisseur
-                    if (item.provider && typeof item.provider.executeAction === 'function') {
-                        item.provider.executeAction(item.id, this.currentCell);
-                    } else if (typeof item.action === 'function') {
-                        item.action(this.currentCell);
-                    }
-                });
+                    // Action (seulement pour les éléments actifs)
+                    menuItem.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.hideMenu();
+                        
+                        // Exécuter l'action via le fournisseur
+                        if (item.provider && typeof item.provider.executeAction === 'function') {
+                            item.provider.executeAction(item.id, this.currentCell);
+                        } else if (typeof item.action === 'function') {
+                            item.action(this.currentCell);
+                        }
+                    });
+                }
                 
                 this.menu.appendChild(menuItem);
             }
@@ -253,7 +271,9 @@ export default class ContextMenuPlugin {
         
         // Supprimer les écouteurs d'événements
         if (this.table?.table) {
-            this.table.table.removeEventListener('contextmenu', this.handleContextMenu);
+            this.table.table.removeEventListener('contextmenu', this.boundHandleContextMenu);
+            document.removeEventListener('click', this.boundHideMenu);
+            document.removeEventListener('keydown', this.boundKeydownHandler);
         }
         
         // Vider les providers

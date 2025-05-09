@@ -23,12 +23,7 @@ th[th-sort] {
     cursor: pointer;
 }
 
-th[th-sort]::after {
-    content: '⇅';
-    position: absolute;
-    right: 8px;
-    opacity: 0.5;
-}
+
 
 th[th-sort].asc::after {
     content: '↑';
@@ -65,4 +60,108 @@ tr.modified {
 
 td.td-actions .cell-wrapper{
     justify-content: space-around;
+}
+/* Styles pour les textareas dans le plugin Edit */
+.edit-textarea {
+    width: 100%;
+    min-width: 200px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: inherit;
+    resize: vertical;
+}
+
+/* Ajuster la hauteur des cellules avec textarea */
+td[data-edit-type="textarea"] .cell-wrapper {
+    min-height: 40px;
+    white-space: pre-wrap;
+}
+/* Styles pour les filtres de colonne */
+.column-filter {
+    position: relative;
+    display: inline-block;
+    margin-left: 5px;
+    vertical-align: middle;
+}
+
+.filter-icon {
+    cursor: pointer;
+    color: #666;
+    font-size: 0.9em;
+}
+
+.filter-icon:hover {
+    color: #333;
+}
+
+.column-filter-input {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1000;
+    width: 150px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background-color: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+/* Styles pour les colonnes filtrées */
+th.filtered .filter-icon {
+    color: #007bff;
+}
+
+/* Styles pour la pagination */
+.pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.pagination {
+    display: flex;
+    gap: 5px;
+}
+
+.page-size-container {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.pagination-info {
+    font-size: 0.9em;
+    color: #666;
+}
+/* Styles pour le plugin Sort */
+th.sortable {
+    cursor: pointer;
+    position: relative;
+    padding-right: 20px; /* Espace pour l'icône */
+}
+
+th.sortable .sort-indicator {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #666;
+    transition: color 0.2s ease;
+}
+
+th.sortable[data-sort-direction="asc"] .sort-indicator {
+    color: #007bff;
+}
+
+th.sortable[data-sort-direction="desc"] .sort-indicator {
+    color: #007bff;
+}
+
+th.sortable:hover .sort-indicator {
+    color: #333;
 }

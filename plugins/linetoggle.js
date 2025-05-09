@@ -5,7 +5,7 @@
 export default class LineTogglePlugin {
     constructor(config = {}) {
         this.name = 'lineToggle';
-        this.version = '1.0.0';
+        this.version = '1.1.0';
         this.type = 'display';
         this.table = null;
         this.dependencies = [];
@@ -102,11 +102,15 @@ export default class LineTogglePlugin {
     setupEventListeners() {
         if (!this.table?.table) return;
 
+        // Stocker les références liées pour pouvoir les supprimer plus tard
+        this.boundHandleCellChange = this.handleCellChange.bind(this);
+        this.boundHandleRowAdded = this.handleRowAdded.bind(this);
+
         // Écouter les changements de cellule
-        this.table.table.addEventListener('cell:change', this.handleCellChange.bind(this));
+        this.table.table.addEventListener('cell:change', this.boundHandleCellChange);
 
         // Écouter l'ajout de nouvelles lignes
-        this.table.table.addEventListener('row:added', this.handleRowAdded.bind(this));
+        this.table.table.addEventListener('row:added', this.boundHandleRowAdded);
     }
 
     handleCellChange(event) {
@@ -305,9 +309,13 @@ export default class LineTogglePlugin {
     destroy() {
         this.debug('Destruction du plugin LineToggle');
         if (this.table?.table) {
-            // Suppression des écouteurs d'événements
-            this.table.table.removeEventListener('cell:change', this.handleCellChange);
-            this.table.table.removeEventListener('row:added', this.handleRowAdded);
+            // Suppression des écouteurs d'événements avec les références liées stockées
+            if (this.boundHandleCellChange) {
+                this.table.table.removeEventListener('cell:change', this.boundHandleCellChange);
+            }
+            if (this.boundHandleRowAdded) {
+                this.table.table.removeEventListener('row:added', this.boundHandleRowAdded);
+            }
         }
     }
 }
