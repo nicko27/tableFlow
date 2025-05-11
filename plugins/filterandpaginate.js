@@ -1,7 +1,7 @@
 export default class FilterAndPaginatePlugin {
     constructor(config = {}) {
         this.name = 'filterandpaginate';
-        this.version = '1.2.0';
+        this.version = '1.2.2';
         this.type = 'filter';
         this.table = null;
         this.config = {...this.getDefaultConfig(), ...config};
@@ -51,11 +51,7 @@ export default class FilterAndPaginatePlugin {
                 next: '<i class="fas fa-chevron-right"></i>',
                 last: '<i class="fas fa-angle-double-right"></i>',
                 filter: '<i class="fas fa-filter"></i>' // Nouvelle icône pour les filtres
-            },
-            backwardIcon: '<i class="fas fa-chevron-left"></i>',
-            forwardIcon: '<i class="fas fa-chevron-right"></i>',
-            fastBackwardIcon: '<i class="fas fa-angle-double-left"></i>',
-            fastForwardIcon: '<i class="fas fa-angle-double-right"></i>'
+            }
         };
     }
 
@@ -63,20 +59,33 @@ export default class FilterAndPaginatePlugin {
         this.table = tableHandler;
         this.debug('Initialisation avec la table:', this.table);
 
+        // Attendre que le DOM soit complètement chargé et que les wrappers soient initialisés
+        setTimeout(() => {
+            // Vérifier si les wrappers sont déjà initialisés
+            const headersWithWrappers = this.table.table.querySelectorAll('thead th .head-wrapper');
+            if (headersWithWrappers.length === 0) {
+                this.debug('Les wrappers ne sont pas encore initialisés, attente supplémentaire...');
+                // Attendre un peu plus pour s'assurer que les wrappers sont initialisés
+                setTimeout(() => this.completeInit(), 100);
+            } else {
+                this.completeInit();
+            }
+        }, 50);
+    }
+    
+    completeInit() {
         // Setup du filtre si activé
         if (this.config.enableFilter) {
             this.setupFilter();
         }
 
-        // Setup des filtres par colonne si activés
-        if (this.config.enableColumnFilters) {
-            this.setupColumnFilters();
-        }
+        // Setup des filtres par colonne
+        this.setupColumnFilters();
 
         // Création et insertion du conteneur
         this.createContainer();
 
-        // Écoute de l'événement de tri (correction de la typo)
+        // Écoute de l'événement de tri
         this.table.table.addEventListener('sortAppended', () => {
             // Sauvegarder l'état avant le rafraîchissement
             this.saveState();
@@ -94,7 +103,14 @@ export default class FilterAndPaginatePlugin {
             this.refresh(true);
         });
 
-        this.table.table.addEventListener('cell:change', () => {
+        // Écouter les événements de modification de cellule
+        this.table.table.addEventListener('cell:modified', () => {
+            this.saveState();
+            this.refresh(true);
+        });
+
+        // Écouter également l'événement row:saved qui peut être déclenché après une modification
+        this.table.table.addEventListener('row:saved', () => {
             this.saveState();
             this.refresh(true);
         });
@@ -103,6 +119,8 @@ export default class FilterAndPaginatePlugin {
         if (!this.restoreState()) {
             this.refresh();
         }
+        
+        this.debug('Initialisation du plugin FilterAndPaginate terminée');
     }
 
     setupFilter() {
@@ -119,7 +137,11 @@ export default class FilterAndPaginatePlugin {
 
         this.debug('Configuration du filtre sur l\'input:', input);
 
-        input.addEventListener('input', (e) => {
+        // Supprimer les écouteurs d'événements existants pour éviter les doublons
+        const newInput = input.cloneNode(true);
+        input.parentNode.replaceChild(newInput, input);
+
+        newInput.addEventListener('input', (e) => {
             this.debug('Événement input déclenché:', e.target.value);
 
             if (this.filterTimeout) {
@@ -136,35 +158,104 @@ export default class FilterAndPaginatePlugin {
                 if (this.table.options.onFilter) {
                     this.table.options.onFilter(this.filterValue);
                 }
+                
+                // Déclencher un événement personnalisé pour informer que le filtre a été appliqué
+                this.table.table.dispatchEvent(new CustomEvent('filter:applied', {
+                    detail: {
+                        value: this.filterValue,
+                        source: 'global'
+                    },
+                    bubbles: true
+                }));
             }, this.config.debounceTime);
+        });
+        
+        // Ajouter un écouteur pour la touche Escape pour effacer le filtre
+        newInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                newInput.value = '';
+                this.filterValue = '';
+                this.currentPage = 1;
+                this.refresh();
+            }
         });
     }
 
     // Méthode pour ajouter des filtres par colonne
     setupColumnFilters() {
+        // Activer automatiquement les filtres par colonne si des attributs th-filter sont présents
+        const hasFilterColumns = this.table.table.querySelectorAll('th[th-filter]').length > 0;
+        if (hasFilterColumns) {
+            this.config.enableColumnFilters = true;
+            this.debug('Filtres par colonne activés automatiquement car des attributs th-filter sont présents');
+        }
+        
         if (!this.config.enableColumnFilters) return;
         
-        const headerCells = this.table.table.querySelectorAll('thead th');
+        const headerCells = Array.from(this.table.table.querySelectorAll('thead th'));
         
         // Exclure les colonnes qui ne doivent pas avoir de filtre
-        const excludeColumns = Array.from(this.table.table.querySelectorAll(`th[${this.config.filterExcludeAttribute}], th[th-sql-exclude], th[th-hide]`))
-            .map(th => Array.from(headerCells).indexOf(th));
+        const excludeColumns = headerCells
+            .map((th, index) => ({ th, index }))
+            .filter(({ th }) => th.hasAttribute(this.config.filterExcludeAttribute) || th.hasAttribute('th-hide'))
+            .map(({ index }) => index);
         
         // Identifier les colonnes qui doivent avoir un filtre
-        const filterColumns = Array.from(headerCells)
+        const filterColumns = headerCells
             .map((th, index) => ({ th, index }))
             .filter(({ th, index }) => {
-                // Si l'attribut filterColumnAttribute est défini, n'ajouter des filtres qu'aux colonnes avec cet attribut
-                if (this.config.filterColumnAttribute) {
-                    return th.hasAttribute(this.config.filterColumnAttribute) && !excludeColumns.includes(index);
-                }
-                // Sinon, ajouter des filtres à toutes les colonnes non exclues
-                return !excludeColumns.includes(index);
+                return th.hasAttribute('th-filter') && !excludeColumns.includes(index);
             });
         
-        this.debug(`${filterColumns.length} colonnes configurées pour le filtrage par colonne`);
+        this.debug(`${filterColumns.length} colonnes configurées pour le filtrage par colonne:`, 
+            filterColumns.map(({ th, index }) => ({ id: th.id, index })));
+        
+        // Ajouter un style CSS pour les filtres de colonne s'il n'existe pas déjà
+        if (!document.getElementById('tableflow-filter-styles')) {
+            const style = document.createElement('style');
+            style.id = 'tableflow-filter-styles';
+            style.textContent = `
+                .column-filter {
+                    display: inline-block;
+                    margin-left: 5px;
+                    position: relative;
+                }
+                .filter-icon {
+                    cursor: pointer;
+                    color: #666;
+                    font-size: 0.9em;
+                    margin-left: 3px;
+                }
+                .filter-icon:hover {
+                    color: #000;
+                }
+                .column-filter-input {
+                    position: absolute;
+                    top: 100%;
+                    left: 0;
+                    z-index: 100;
+                    min-width: 150px;
+                    padding: 5px;
+                    border: 1px solid #ccc;
+                    border-radius: 3px;
+                    background: white;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                }
+                th.filtered .filter-icon {
+                    color: #007bff;
+                    font-weight: bold;
+                }
+            `;
+            document.head.appendChild(style);
+        }
         
         filterColumns.forEach(({ th: header, index }) => {
+            // Vérifier si un filtre existe déjà pour cette colonne
+            if (header.querySelector('.column-filter')) {
+                this.debug(`Filtre déjà présent pour la colonne ${header.id}, ignoré`);
+                return;
+            }
+            
             // Créer le conteneur de filtre
             const filterContainer = document.createElement('div');
             filterContainer.className = 'column-filter';
@@ -172,20 +263,39 @@ export default class FilterAndPaginatePlugin {
             // Créer l'icône de filtre
             const filterIcon = document.createElement('span');
             filterIcon.className = 'filter-icon';
-            filterIcon.innerHTML = this.config.icons.filter;
+            filterIcon.innerHTML = this.config.icons.filter || '<i class="fas fa-filter"></i>';
             filterContainer.appendChild(filterIcon);
             
-            // Créer l'input de filtre (caché par défaut)
+            // Créer l'input de filtre
             const filterInput = document.createElement('input');
             filterInput.type = 'text';
             filterInput.className = 'column-filter-input';
-            filterInput.placeholder = this.config.labels.columnFilter;
+            filterInput.placeholder = this.config.labels.columnFilter || 'Filtrer';
             filterInput.style.display = 'none';
             filterContainer.appendChild(filterInput);
             
             // Ajouter le conteneur à l'en-tête
-            const headerWrapper = header.querySelector('.head-wrapper') || header;
-            headerWrapper.appendChild(filterContainer);
+            const headerWrapper = header.querySelector('.head-wrapper');
+            if (headerWrapper) {
+                headerWrapper.appendChild(filterContainer);
+                this.debug(`Filtre ajouté au wrapper existant pour la colonne ${header.id}`);
+            } else {
+                // Si pas de wrapper, créer un wrapper et y mettre le contenu existant + le filtre
+                const wrapper = document.createElement('div');
+                wrapper.className = this.table.options.headWrapperClass || 'head-wrapper';
+                
+                // Déplacer le contenu existant dans le wrapper
+                while (header.firstChild) {
+                    wrapper.appendChild(header.firstChild);
+                }
+                
+                // Ajouter le conteneur de filtre au wrapper
+                wrapper.appendChild(filterContainer);
+                
+                // Ajouter le wrapper à l'en-tête
+                header.appendChild(wrapper);
+                this.debug(`Nouveau wrapper créé avec filtre pour la colonne ${header.id}`);
+            }
             
             // Gérer les événements
             filterIcon.addEventListener('click', (e) => {
@@ -220,9 +330,32 @@ export default class FilterAndPaginatePlugin {
                 }, this.config.debounceTime);
             });
             
+            // Ajouter un gestionnaire d'événement blur pour masquer l'input lorsque l'utilisateur clique ailleurs
+            filterInput.addEventListener('blur', (e) => {
+                // Utiliser un petit délai pour permettre les clics sur les éléments du filtre
+                setTimeout(() => {
+                    filterInput.style.display = 'none';
+                }, 200);
+            });
+            
             // Empêcher la propagation des événements clavier
             filterInput.addEventListener('keydown', (e) => {
                 e.stopPropagation();
+                
+                // Effacer le filtre avec Escape
+                if (e.key === 'Escape') {
+                    filterInput.value = '';
+                    this.columnFilters.delete(index);
+                    header.classList.remove('filtered');
+                    this.currentPage = 1;
+                    this.refresh();
+                    filterInput.style.display = 'none';
+                }
+                
+                // Masquer l'input et appliquer le filtre avec Enter
+                if (e.key === 'Enter') {
+                    filterInput.style.display = 'none';
+                }
             });
         });
     }
@@ -307,6 +440,11 @@ export default class FilterAndPaginatePlugin {
         const paginationContainer = this.container.querySelector(`.${this.config.paginationClass}`);
         paginationContainer.innerHTML = '';
 
+        // Si aucune page, ne pas afficher les boutons de pagination
+        if (this.totalPages === 0) {
+            return;
+        }
+
         // Boutons de navigation
         paginationContainer.appendChild(this.createPageButton(this.config.icons.first || this.config.labels.first, 1, this.currentPage === 1));
         paginationContainer.appendChild(this.createPageButton(this.config.icons.prev || this.config.labels.prev, this.currentPage - 1, this.currentPage === 1));
@@ -332,6 +470,12 @@ export default class FilterAndPaginatePlugin {
         if (!infoContainer) return;
 
         const filteredRows = this.getFilteredRows();
+        
+        if (filteredRows.length === 0) {
+            infoContainer.textContent = "Aucune entrée à afficher";
+            return;
+        }
+        
         const start = (this.currentPage - 1) * this.config.pageSize + 1;
         const end = Math.min(start + this.config.pageSize - 1, filteredRows.length);
 
@@ -353,21 +497,28 @@ export default class FilterAndPaginatePlugin {
             return rows;
         }
 
-        // Récupérer les colonnes à exclure du filtrage
-        const excludeColumns = Array.from(this.table.table.querySelectorAll(`th[${this.config.filterExcludeAttribute}], th[th-sql-exclude], th[th-hide]`))
-            .map(th => Array.from(this.table.table.querySelectorAll('th')).indexOf(th));
+        // Récupérer les colonnes à exclure du filtrage global uniquement
+        const headerCells = Array.from(this.table.table.querySelectorAll('thead th'));
+        const excludeColumns = headerCells
+            .map((th, index) => ({ th, index }))
+            .filter(({ th }) => th.hasAttribute('th-filter-exclude') || th.hasAttribute('th-hide'))
+            .map(({ index }) => index);
         
-        this.debug('Colonnes exclues du filtrage:', excludeColumns);
+        this.debug('Colonnes exclues du filtrage global:', excludeColumns);
 
         return rows.filter(row => {
             // Vérifier le filtre global
             if (hasGlobalFilter) {
                 const matchesGlobal = Array.from(row.cells).some((cell, index) => {
-                    // Ignorer les colonnes exclues
+                    // Ignorer les colonnes exclues du filtrage global
                     if (excludeColumns.includes(index)) {
                         return false;
                     }
+                    
+                    // Récupérer la valeur de la cellule
                     const value = this.getCellValue(cell);
+                    
+                    // Vérifier si la valeur contient le filtre (insensible à la casse)
                     return value.toLowerCase().includes(this.filterValue);
                 });
                 
@@ -437,7 +588,7 @@ export default class FilterAndPaginatePlugin {
         }
 
         this.currentPage = page;
-        this.refresh();
+        this.refresh(true); // Garder la page actuelle
 
         // Déclencher l'événement de changement de page
         const event = new CustomEvent('pageChanged', {
@@ -451,16 +602,21 @@ export default class FilterAndPaginatePlugin {
 
     refresh(keepPage = false) {
         const filteredRows = this.getFilteredRows();
-        this.totalPages = Math.ceil(filteredRows.length / this.config.pageSize);
-
+        
+        // Calculer le nombre total de pages
+        this.totalPages = Math.max(1, Math.ceil(filteredRows.length / this.config.pageSize));
+        
         // Ajuster la page courante si nécessaire
         if (!keepPage || this.currentPage > this.totalPages) {
-            this.currentPage = this.totalPages || 1;
+            this.currentPage = Math.min(this.currentPage, this.totalPages);
         }
+        
+        // S'assurer que la page courante est au moins 1
+        this.currentPage = Math.max(1, this.currentPage);
 
         // Calculer les indices de début et de fin
         const start = (this.currentPage - 1) * this.config.pageSize;
-        const end = start + this.config.pageSize;
+        const end = Math.min(start + this.config.pageSize, filteredRows.length);
 
         // Masquer toutes les lignes
         const allRows = this.table.getAllRows();
@@ -486,6 +642,8 @@ export default class FilterAndPaginatePlugin {
             bubbles: true
         });
         this.table.table.dispatchEvent(event);
+        
+        this.debug(`Rafraîchissement terminé: Page ${this.currentPage}/${this.totalPages}, ${filteredRows.length} lignes filtrées`);
     }
 
     // Méthode pour sauvegarder l'état actuel

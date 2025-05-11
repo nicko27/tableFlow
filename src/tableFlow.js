@@ -332,14 +332,23 @@ export default class TableFlow {
         return plugin.instance;
     }
 
-    refreshPlugins() {
+    refreshPlugins(excludePlugins = []) {
         try {
-            // Rafraîchit les plugins dans l'ordre de leurs dépendances
+            // Convertir excludePlugins en minuscules pour une comparaison insensible à la casse
+            const excluded = (excludePlugins || []).map(name => name.toLowerCase());
+            
+            // Rafraîchir les plugins dans l'ordre de leurs dépendances
             const refreshed = new Set();
             const failedPlugins = [];
 
             const refreshPlugin = (pluginName) => {
                 if (refreshed.has(pluginName)) return true;
+                
+                // Vérifier si le plugin est exclu du rafraîchissement
+                if (excluded.includes(pluginName.toLowerCase())) {
+                    this.logger.debug(`Plugin ${pluginName} exclu du rafraîchissement`);
+                    return true; // Considérer comme rafraîchi même s'il est exclu
+                }
 
                 const pluginInfo = this.plugins.get(pluginName.toLowerCase());
                 if (!pluginInfo?.instance) {
@@ -347,7 +356,7 @@ export default class TableFlow {
                     return false;
                 }
 
-                // Vérifie les dépendances d'abord
+                // Vérifier les dépendances d'abord
                 let allDependenciesOk = true;
                 if (pluginInfo.instance.dependencies) {
                     for (const dep of pluginInfo.instance.dependencies) {
@@ -364,7 +373,7 @@ export default class TableFlow {
                     return false;
                 }
 
-                // Rafraîchit le plugin
+                // Rafraîchir le plugin
                 if (typeof pluginInfo.instance.refresh === 'function') {
                     try {
                         pluginInfo.instance.refresh();
@@ -383,13 +392,17 @@ export default class TableFlow {
                 }
             };
 
-            // Rafraîchit tous les plugins
-            this.plugins.forEach((_, name) => refreshPlugin(name));
+            // Rafraîchir tous les plugins non exclus
+            this.plugins.forEach((_, name) => {
+                if (!excluded.includes(name.toLowerCase())) {
+                    refreshPlugin(name);
+                }
+            });
 
             if (failedPlugins.length > 0) {
                 this.logger.warn(`${refreshed.size} plugins rafraîchis, ${failedPlugins.length} échecs: ${failedPlugins.join(', ')}`);
             } else {
-                this.logger.debug(`Tous les plugins (${refreshed.size}) ont été rafraîchis avec succès`);
+                this.logger.debug(`Plugins rafraîchis avec succès (${refreshed.size} plugins, ${excluded.length} exclus)`);
             }
         } catch (error) {
             this.logger.error(`Erreur lors du rafraîchissement des plugins: ${error.message}`, error);

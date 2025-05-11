@@ -235,7 +235,7 @@ export default class EditPlugin {
             inputElement.value = currentValue;
             
             // Ajuster la hauteur du textarea en fonction du contenu
-            const lineCount = (currentValue.match(/\\n/g) || []).length + 1;
+            const lineCount = (currentValue.match(/\n/g) || []).length + 1;
             if (lineCount > this.config.textareaRows) {
                 inputElement.rows = Math.min(lineCount, this.config.textareaRows * 2);
             }

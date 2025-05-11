@@ -6,7 +6,7 @@ Le plugin Choice permet de transformer des cellules de tableau en éléments de 
 
 ## Version
 
-Version actuelle : 3.2.0
+Version actuelle : 3.4.0
 
 ## Fonctionnalités
 
@@ -18,8 +18,9 @@ Version actuelle : 3.2.0
 - Gestion améliorée des URLs relatives et absolues pour les requêtes AJAX
 - Annulation automatique des requêtes AJAX précédentes
 - Sélection multiple avec tags visuels et cases à cocher
-- Personnalisation complète de l'apparence et du comportement
+- Personnalisation complète de l'apparence et du comportement via des classes CSS configurables
 - Intégration transparente avec les autres plugins TableFlow
+- Tri des tags avec boutons haut/bas ou glisser-déposer (via Sortable.js)
 
 ## HTML Attributes
 
@@ -41,7 +42,7 @@ Version actuelle : 3.2.0
     // Options pour chaque colonne
     columns: {
         'columnId': {
-            type: 'toggle',           // Type de sélection: 'toggle' ou 'searchable'
+            type: 'toggle',           // Type de sélection: 'toggle', 'searchable' ou 'multiple'
             values: [                 // Valeurs disponibles
                 { value: '1', label: 'Option 1' },
                 { value: '2', label: 'Option 2' }
@@ -58,6 +59,9 @@ Version actuelle : 3.2.0
                 dropdownClass: 'choice-dropdown',
                 optionClass: 'choice-option',
                 searchClass: 'choice-search',
+                noResultsClass: 'no-results',
+                loadingClass: 'loading',
+                errorClass: 'error',
                 placeholder: 'Rechercher...',
                 noResultsText: 'Aucun résultat',
                 loadingText: 'Chargement...'
@@ -67,10 +71,19 @@ Version actuelle : 3.2.0
                 tagClass: 'choice-tag', // Classe CSS pour les tags
                 tagContainerClass: 'choice-tags', // Classe CSS pour le conteneur de tags
                 removeTagClass: 'choice-tag-remove', // Classe CSS pour le bouton de suppression
+                tagOrderClass: 'tag-order', // Classe CSS pour le numéro d'ordre
+                selectedClass: 'multiple-selected', // Classe CSS pour les options sélectionnées
+                optionCheckboxClass: 'multiple-option-checkbox', // Classe CSS pour les cases à cocher
                 placeholder: 'Sélectionner des options...', // Texte par défaut
                 maxTags: null,        // Nombre maximum de tags (null = illimité)
                 allowCustomValues: true, // Autoriser l'ajout de valeurs personnalisées
-                customValueClass: 'custom-value' // Classe CSS pour les valeurs personnalisées
+                customValueClass: 'custom-value', // Classe CSS pour les valeurs personnalisées
+                showOrder: false,     // Afficher les numéros d'ordre devant les tags
+                orderPrefix: '',      // Préfixe pour les numéros d'ordre (ex: "#")
+                orderSuffix: '-',     // Suffixe pour les numéros d'ordre (ex: "-")
+                upDownButtons: false, // Afficher les boutons haut/bas pour réordonner
+                upButtonClass: 'choice-tag-up', // Classe CSS pour le bouton monter
+                downButtonClass: 'choice-tag-down' // Classe CSS pour le bouton descendre
             },
             ajax: {                   // Options pour les requêtes AJAX
                 enabled: false,
@@ -90,53 +103,47 @@ Version actuelle : 3.2.0
                 mappings: {           // Mappings des champs source vers les colonnes cibles
                     'id': 'id_column',
                     'email': 'email_column'
-                }
+                },
+                autoDetect: true,     // Détection automatique des champs
+                cellIdFormat: '{column}_{rowId}' // Format pour les IDs de cellule
             }
         }
     }
 }
 ```
 
-## Formats de données
+## Personnalisation des classes CSS
 
-### Format des valeurs
+Le plugin Choice permet une personnalisation complète de l'apparence via des classes CSS configurables. Toutes les classes utilisées dans le plugin peuvent être redéfinies dans la configuration :
 
-Les valeurs peuvent être définies sous forme simple ou d'objets :
+### Classes pour le mode searchable
 
 ```javascript
-// Format simple
-values: ['Option 1', 'Option 2', 'Option 3']
-
-// Format objet (recommandé)
-values: [
-    { value: '1', label: 'Option 1' },
-    { value: '2', label: 'Option 2' },
-    { value: '3', label: 'Option 3', readOnly: true, readOnlyClass: 'locked' }
-]
+searchable: {
+    dropdownClass: 'ma-classe-dropdown',
+    optionClass: 'ma-classe-option',
+    searchClass: 'ma-classe-recherche',
+    noResultsClass: 'ma-classe-aucun-resultat',
+    loadingClass: 'ma-classe-chargement',
+    errorClass: 'ma-classe-erreur'
+}
 ```
 
-### Format de réponse AJAX attendu
+### Classes pour le mode multiple
 
-Le plugin attend une réponse JSON au format suivant :
-
-```json
-[
-    {
-        "value": "1",
-        "label": "Option 1",
-        "id": "123",
-        "email": "option1@example.com"
-    },
-    {
-        "value": "2",
-        "label": "Option 2",
-        "id": "456",
-        "email": "option2@example.com"
-    }
-]
+```javascript
+multiple: {
+    tagClass: 'ma-classe-tag',
+    tagContainerClass: 'ma-classe-conteneur-tags',
+    removeTagClass: 'ma-classe-supprimer-tag',
+    tagOrderClass: 'ma-classe-ordre',
+    selectedClass: 'ma-classe-selectionne',
+    optionCheckboxClass: 'ma-classe-checkbox',
+    customValueClass: 'ma-classe-valeur-personnalisee',
+    upButtonClass: 'ma-classe-bouton-haut',
+    downButtonClass: 'ma-classe-bouton-bas'
+}
 ```
-
-Les propriétés supplémentaires (comme `id` et `email` dans l'exemple) peuvent être utilisées pour l'auto-remplissage.
 
 ## Exemples d'utilisation
 
@@ -168,7 +175,7 @@ const table = new TableFlow({
 });
 ```
 
-### Mode Searchable avec options statiques
+### Mode Searchable avec options statiques et classes personnalisées
 
 ```javascript
 const table = new TableFlow({
@@ -186,6 +193,10 @@ const table = new TableFlow({
                         { value: 'it', label: 'Italie' }
                     ],
                     searchable: {
+                        dropdownClass: 'country-dropdown',
+                        optionClass: 'country-option',
+                        searchClass: 'country-search',
+                        noResultsClass: 'country-no-results',
                         placeholder: 'Rechercher un pays...',
                         noResultsText: 'Aucun pays trouvé'
                     }
@@ -196,7 +207,7 @@ const table = new TableFlow({
 });
 ```
 
-### Mode Multiple avec tags
+### Mode Multiple avec tags et classes personnalisées
 
 ```javascript
 const table = new TableFlow({
@@ -216,8 +227,15 @@ const table = new TableFlow({
                     ],
                     multiple: {
                         separator: ',',
+                        tagClass: 'skill-tag',
+                        tagContainerClass: 'skills-container',
+                        removeTagClass: 'skill-remove',
                         maxTags: 5, // Limiter à 5 compétences maximum
-                        allowCustomValues: true // Permettre d'ajouter des valeurs personnalisées
+                        allowCustomValues: true, // Permettre d'ajouter des valeurs personnalisées
+                        customValueClass: 'custom-skill',
+                        showOrder: true, // Afficher les numéros d'ordre
+                        orderPrefix: '#',
+                        upDownButtons: true // Activer les boutons de réorganisation
                     }
                 }
             }
@@ -226,7 +244,7 @@ const table = new TableFlow({
 });
 ```
 
-### Mode Multiple avec recherche AJAX
+### Mode Multiple avec recherche AJAX et classes personnalisées
 
 ```javascript
 const table = new TableFlow({
@@ -239,6 +257,8 @@ const table = new TableFlow({
                     type: 'multiple',
                     searchable: {
                         enabled: true,
+                        dropdownClass: 'perm-dropdown',
+                        searchClass: 'perm-search',
                         placeholder: 'Rechercher des permissions...',
                         minWidth: '300px'
                     },
@@ -251,6 +271,7 @@ const table = new TableFlow({
                     multiple: {
                         separator: ';',
                         tagClass: 'permission-tag',
+                        tagContainerClass: 'permissions-container',
                         removeTagClass: 'permission-remove'
                     }
                 }
@@ -295,36 +316,12 @@ const table = new TableFlow({
                             'id': 'id_personne',
                             'email': 'email'
                         }
-                    },
-                    // Fonction pour déterminer dynamiquement si une cellule est en lecture seule
-                    isReadOnly: (value, rowData) => {
-                        // Exemple: les utilisateurs avec super_admin=1 ne peuvent pas être modifiés
-                        return rowData.super_admin === 1 || rowData.super_admin === '1';
                     }
                 }
             }
         }
     }
 });
-```
-
-### Configuration via attributs HTML
-
-```html
-<table id="monTableau">
-    <thead>
-        <tr>
-            <th id="status" th-choice="toggle">Statut</th>
-            <th id="pays" th-choice="searchable">Pays</th>
-            <th id="competences" th-choice="multiple">Compétences</th>
-            <th id="id_personne">ID</th>
-            <th id="email">Email</th>
-        </tr>
-    </thead>
-    <tbody>
-        <!-- Données du tableau -->
-    </tbody>
-</table>
 ```
 
 ## Méthodes
@@ -353,13 +350,21 @@ Le plugin déclenche et réagit aux événements suivants :
 
 ## Styles CSS
 
-Le plugin ajoute automatiquement les styles CSS suivants :
+Le plugin ajoute automatiquement des styles CSS pour tous les éléments. Ces styles peuvent être personnalisés en définissant des classes CSS personnalisées dans la configuration. Voici un exemple des styles par défaut :
 
 ```css
+/* Styles pour les cellules */
 .choice-cell {
     cursor: pointer;
     position: relative;
 }
+.choice-cell.readonly {
+    cursor: not-allowed;
+    opacity: 0.8;
+    background-color: #f8f8f8;
+}
+
+/* Styles pour le dropdown */
 .choice-dropdown {
     position: absolute;
     top: 100%;
@@ -377,6 +382,8 @@ Le plugin ajoute automatiquement les styles CSS suivants :
 .choice-dropdown.active {
     display: block;
 }
+
+/* Styles pour la recherche */
 .choice-search {
     width: 100%;
     padding: 8px;
@@ -385,6 +392,8 @@ Le plugin ajoute automatiquement les styles CSS suivants :
     outline: none;
     box-sizing: border-box;
 }
+
+/* Styles pour les options */
 .choice-option {
     padding: 8px;
     cursor: pointer;
@@ -392,6 +401,8 @@ Le plugin ajoute automatiquement les styles CSS suivants :
 .choice-option:hover {
     background-color: #f5f5f5;
 }
+
+/* Styles pour les messages */
 .no-results, .loading, .error {
     padding: 8px;
     color: #999;
@@ -401,15 +412,55 @@ Le plugin ajoute automatiquement les styles CSS suivants :
 .error {
     color: #e74c3c;
 }
+
+/* Styles pour le mode multiple */
+.choice-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 2px;
+}
+.choice-tag {
+    display: inline-flex;
+    align-items: center;
+    background-color: #e9f5fe;
+    border: 1px solid #c5e2fa;
+    border-radius: 3px;
+    padding: 2px 6px;
+    margin: 2px;
+    font-size: 0.9em;
+    user-select: none;
+    cursor: default;
+}
+.choice-tag .tag-order {
+    font-weight: bold;
+    margin-right: 3px;
+    opacity: 0.7;
+}
+.choice-tag-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: #c5e2fa;
+    color: #4a90e2;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: bold;
+}
 ```
 
 ## Bonnes pratiques
 
 1. **Utiliser le format objet pour les valeurs** : Le format objet (`{ value, label }`) est plus flexible et permet d'utiliser du HTML dans les labels.
-2. **Limiter le nombre d'options** : Pour de grandes listes, utilisez le mode searchable avec AJAX.
-3. **Configurer un debounceTime approprié** : Ajustez le délai en fonction de votre API et de l'expérience utilisateur souhaitée.
-4. **Utiliser l'auto-remplissage** : Pour les données liées, utilisez l'auto-remplissage plutôt que de dupliquer les données.
-5. **Parser les réponses AJAX** : Utilisez la fonction `responseParser` pour adapter les données de votre API au format attendu.
+2. **Personnaliser les classes CSS** : Définir des classes CSS personnalisées pour adapter l'apparence à votre design.
+3. **Limiter le nombre d'options** : Pour de grandes listes, utilisez le mode searchable avec AJAX.
+4. **Configurer un debounceTime approprié** : Ajustez le délai en fonction de votre API et de l'expérience utilisateur souhaitée.
+5. **Utiliser l'auto-remplissage** : Pour les données liées, utilisez l'auto-remplissage plutôt que de dupliquer les données.
+6. **Parser les réponses AJAX** : Utilisez la fonction `responseParser` pour adapter les données de votre API au format attendu.
 
 ## Dépannage
 
@@ -423,8 +474,32 @@ Le plugin ajoute automatiquement les styles CSS suivants :
 | Les requêtes AJAX s'accumulent | Activez l'option `abortPrevious: true` pour annuler les requêtes précédentes |
 | Les URLs relatives ne fonctionnent pas | Assurez-vous que les URLs commencent par '/' ou utilisez des URLs absolues |
 | Impossible d'ajouter des valeurs personnalisées | Vérifiez que l'option `allowCustomValues` est définie à `true` dans la configuration `multiple` |
+| Les classes CSS personnalisées ne sont pas appliquées | Vérifiez que les noms de classes sont correctement définis dans la configuration |
 
 ## Utilisation avancée
+
+### Personnalisation complète des styles
+
+```javascript
+// Configuration avec styles personnalisés
+columns: {
+    'status': {
+        type: 'toggle',
+        values: [
+            { value: 'active', label: 'Actif' },
+            { value: 'inactive', label: 'Inactif' }
+        ],
+        searchable: {
+            dropdownClass: 'status-dropdown',
+            optionClass: 'status-option',
+            searchClass: 'status-search',
+            noResultsClass: 'status-no-results',
+            loadingClass: 'status-loading',
+            errorClass: 'status-error'
+        }
+    }
+}
+```
 
 ### Utilisation de la fonction isReadOnly
 
@@ -461,47 +536,6 @@ columns: {
 }
 ```
 
-### Personnalisation du parser de réponse AJAX
-
-```javascript
-responseParser: function(data) {
-    // Exemple avec une API qui renvoie { results: [...] }
-    if (data.results && Array.isArray(data.results)) {
-        return data.results.map(item => ({
-            value: item.id,
-            label: `${item.firstName} ${item.lastName}`,
-            // Données additionnelles pour l'auto-remplissage
-            email: item.email,
-            phone: item.phone,
-            department: item.department
-        }));
-    }
-    return [];
-}
-```
-
-### Intégration avec des paramètres dynamiques
-
-```javascript
-// Fonction pour mettre à jour les paramètres AJAX en fonction du contexte
-function updateExtraParams(columnId, extraParams) {
-    const choicePlugin = table.getPlugin('choice');
-    const columnConfig = choicePlugin.getColumnConfig(columnId);
-    
-    if (columnConfig && columnConfig.ajax) {
-        columnConfig.ajax.extraParams = {
-            ...columnConfig.ajax.extraParams,
-            ...extraParams
-        };
-    }
-}
-
-// Exemple d'utilisation
-document.getElementById('filterDepartment').addEventListener('change', function() {
-    updateExtraParams('employee', { department: this.value });
-});
-```
-
 ### Auto-remplissage conditionnel
 
 ```javascript
@@ -531,7 +565,8 @@ autoFill: {
     }
 }
 ```
-### Utilisation du mode multiple avec valeurs personnalisées
+
+### Utilisation du mode multiple avec valeurs personnalisées et classes CSS personnalisées
 
 ```javascript
 // Configuration pour permettre aux utilisateurs d'ajouter leurs propres valeurs
@@ -545,63 +580,24 @@ columns: {
         ],
         searchable: {
             enabled: true,
+            dropdownClass: 'tags-dropdown',
+            searchClass: 'tags-search',
             placeholder: 'Rechercher ou ajouter un tag...'
         },
         multiple: {
             allowCustomValues: true,
+            tagClass: 'tag-item',
+            tagContainerClass: 'tags-container',
+            removeTagClass: 'tag-remove',
             customValueClass: 'custom-tag',
             separator: ',',
-            maxTags: 10
+            maxTags: 10,
+            showOrder: true,
+            orderPrefix: '#',
+            upDownButtons: true,
+            upButtonClass: 'tag-up',
+            downButtonClass: 'tag-down'
         }
     }
 }
 ```
-
-Cette configuration permet aux utilisateurs de :
-1. Sélectionner parmi les valeurs prédéfinies
-2. Rechercher dans les valeurs existantes
-3. Ajouter de nouvelles valeurs qui ne sont pas dans la liste
-4. Les valeurs personnalisées sont affichées avec un style différent (classe `custom-tag`)
-## Valeurs manuelles et fonctions dans autoFill
-
-Le plugin Choice permet désormais de définir des valeurs manuelles ou d'utiliser des fonctions dans les mappings autoFill.
-
-### Valeurs manuelles
-
-```javascript
-autoFill: {
-    enabled: true,
-    mappings: {
-        'id': 'user_id',       // Mapping standard: source -> target
-        'status': '1',         // Valeur manuelle: toujours mettre '1' dans la colonne status
-        'created_at': 'now()', // Valeur manuelle: chaîne de caractères
-        'active': 0            // Valeur manuelle: nombre
-    }
-}
-```
-
-### Fonctions de mapping
-
-```javascript
-autoFill: {
-    enabled: true,
-    mappings: {
-        'id': 'user_id',
-        'role': function(data, row) {
-            // Logique conditionnelle basée sur les données
-            if (data.isAdmin) {
-                return 'admin';
-            } else if (data.permissions && data.permissions.includes('manage')) {
-                return 'manager';
-            } else {
-                return 'user';
-            }
-        },
-        'created_at': (data) => new Date().toISOString().split('T')[0]
-    }
-}
-```
-
-### Réapplication des plugins
-
-Lorsqu'une cellule est mise à jour via autoFill, les plugins sont automatiquement réappliqués à cette cellule pour s'assurer que tous les comportements (toggle, searchable, etc.) fonctionnent correctement après le remplissage.
